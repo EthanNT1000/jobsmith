@@ -38,3 +38,19 @@ def test_prepare_interview_uses_standard_tier(monkeypatch, demo_profile, sample_
     monkeypatch.setattr(iv_mod, "get_llm", fake_get_llm)
     iv_mod.prepare_interview(sample_parsed_job, demo_profile, None)
     assert seen["tier"] == "standard"
+
+
+def test_prepare_interview_includes_feedback(monkeypatch, demo_profile, sample_parsed_job):
+    captured = {}
+    canned = InterviewKit(technical_questions=["Q"])
+
+    class _CapLLM:
+        def with_structured_output(self, schema):
+            return self
+        def invoke(self, messages):
+            captured["human"] = messages[-1][1]
+            return canned
+
+    monkeypatch.setattr(iv_mod, "get_llm", lambda tier: _CapLLM())
+    iv_mod.prepare_interview(sample_parsed_job, demo_profile, None, ["多準備系統設計題"])
+    assert "多準備系統設計題" in captured["human"]

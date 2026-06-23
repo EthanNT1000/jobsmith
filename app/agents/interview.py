@@ -10,8 +10,9 @@ INTERVIEW_SYSTEM = (
 )
 
 
-def prepare_interview(job: ParsedJob, profile: Profile, company: CompanyBrief | None) -> InterviewKit:
-    """準備面試包（standard 分層）。"""
+def prepare_interview(job: ParsedJob, profile: Profile, company: CompanyBrief | None,
+                      feedback: list[str] | None = None) -> InterviewKit:
+    """準備面試包（standard 分層）；feedback 為上一輪品管意見。"""
     company_json = company.model_dump_json(indent=2) if company else "（無公司情報）"
     human = (
         "【職缺】\n"
@@ -21,5 +22,7 @@ def prepare_interview(job: ParsedJob, profile: Profile, company: CompanyBrief | 
         "【公司情報】\n"
         f"{company_json}"
     )
+    if feedback:
+        human += "\n\n【品管意見，請據此改進】\n" + "\n".join(f"- {f}" for f in feedback)
     llm = get_llm("standard").with_structured_output(InterviewKit)
     return llm.invoke([("system", INTERVIEW_SYSTEM), ("human", human)])

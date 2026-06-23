@@ -29,3 +29,19 @@ def test_tailor_resume_uses_standard_tier(monkeypatch, demo_profile, sample_pars
     monkeypatch.setattr(resume_mod, "get_llm", fake_get_llm)
     resume_mod.tailor_resume(sample_parsed_job, demo_profile)
     assert seen["tier"] == "standard"
+
+
+def test_tailor_resume_includes_feedback_when_revising(monkeypatch, demo_profile, sample_parsed_job):
+    captured = {}
+    canned = TailoredResume(summary="改好的")
+
+    class _CapLLM:
+        def with_structured_output(self, schema):
+            return self
+        def invoke(self, messages):
+            captured["human"] = messages[-1][1]
+            return canned
+
+    monkeypatch.setattr(resume_mod, "get_llm", lambda tier: _CapLLM())
+    resume_mod.tailor_resume(sample_parsed_job, demo_profile, ["把成果量化"])
+    assert "把成果量化" in captured["human"]

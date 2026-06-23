@@ -10,8 +10,8 @@ RESUME_SYSTEM = (
 )
 
 
-def tailor_resume(job: ParsedJob, profile: Profile) -> TailoredResume:
-    """針對職缺客製履歷（standard 分層）。"""
+def tailor_resume(job: ParsedJob, profile: Profile, feedback: list[str] | None = None) -> TailoredResume:
+    """針對職缺客製履歷（standard 分層）；feedback 為上一輪品管意見。"""
     llm = get_llm("standard").with_structured_output(TailoredResume)
     human = (
         "【職缺】\n"
@@ -19,4 +19,6 @@ def tailor_resume(job: ParsedJob, profile: Profile) -> TailoredResume:
         "【求職者背景】\n"
         f"{profile.model_dump_json(indent=2)}"
     )
+    if feedback:
+        human += "\n\n【品管意見，請據此改進】\n" + "\n".join(f"- {f}" for f in feedback)
     return llm.invoke([("system", RESUME_SYSTEM), ("human", human)])
