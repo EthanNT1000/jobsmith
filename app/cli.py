@@ -111,7 +111,7 @@ def run(jd_path: str, profile_path: str = "data/demo_profile.json") -> CopilotSt
         state_values = graph.get_state(config).values
         print(format_output(state_values, job_title=Path(jd_path).stem))
         decision = input("\n核可這份投遞包嗎？(y/n)：")
-        result = graph.invoke(Command(resume=decision), config)
+        graph.invoke(Command(resume=decision), config)
 
     return graph.get_state(config).values
 
