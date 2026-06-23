@@ -123,3 +123,33 @@ def test_resume_evaluate_handles_agent_error(monkeypatch):
     types = [e["type"] for e in events]
     assert "error" in types
     assert "assessment" not in types
+
+
+def test_jobs_auto_streams_ranked_jobs(monkeypatch):
+    from app.models import Profile, JobPosting, JobMatch, SearchResult
+    monkeypatch.setattr(server_mod, "structure_profile",
+                        lambda text: Profile(name="王", summary="後端", raw_text=text))
+    monkeypatch.setattr(server_mod, "derive_queries", lambda profile: ["AI 工程師"])
+    monkeypatch.setattr(server_mod, "search_all",
+                        lambda q, limit=10: [SearchResult(source="104", jobs=[
+                            JobPosting(source="104", title="AI 工程師", company="某公司", url="u1")])])
+    monkeypatch.setattr(server_mod, "rank_jobs",
+                        lambda profile, jobs, top_k=12: [JobMatch(job=jobs[0], fit_score=88, reason="合適")])
+    client = TestClient(server_mod.app)
+    r = client.post("/api/jobs/auto", data={"resume_text": "我的履歷 Python"})
+    assert r.status_code == 200
+    events = _parse_sse(r.text)
+    types = [e["type"] for e in events]
+    assert types[0] == "start"
+    assert "queries" in types and "jobs" in types
+    assert types[-1] == "done"
+    jobs_ev = next(e for e in events if e["type"] == "jobs")
+    assert jobs_ev["data"][0]["fit_score"] == 88
+    assert jobs_ev["data"][0]["job"]["title"] == "AI 工程師"
+
+
+def test_jobs_auto_empty_returns_error():
+    client = TestClient(server_mod.app)
+    r = client.post("/api/jobs/auto", data={"resume_text": "  "})
+    events = _parse_sse(r.text)
+    assert any(e["type"] == "error" for e in events)

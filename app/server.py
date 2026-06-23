@@ -13,6 +13,8 @@ from app.cli import load_profile
 from app.graph import build_graph
 from app.intake.resume_parser import extract_text
 from app.agents.resume_eval import structure_profile, evaluate_resume
+from app.agents.job_search import derive_queries, rank_jobs
+from app.sources.registry import search_all, linkedin_search_url
 
 app = FastAPI(title="台灣 AI 求職 Co-pilot")
 
@@ -102,6 +104,56 @@ async def resume_evaluate(
             yield _sse({"type": "assessment", "data": assessment})
             yield _sse({"type": "done"})
         except Exception as exc:  # LLM 後端 429/額度/截斷等：回傳友善訊息而非中斷串流
+            yield _sse({"type": "error",
+                        "message": f"AI 服務暫時無法使用，請稍後再試。（{type(exc).__name__}）"})
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@app.post("/api/jobs/auto")
+async def jobs_auto(
+    file: UploadFile | None = File(default=None),
+    resume_text: str = Form(default=""),
+):
+    """履歷 → 自動找職缺：解析履歷 → 推導關鍵字 → 搜尋多站 → 依履歷排序。"""
+    if file is not None:
+        data = await file.read()
+        text = extract_text(data, file.filename or "resume.txt")
+    else:
+        text = resume_text
+
+    def gen():
+        yield _sse({"type": "start"})
+        if not text.strip():
+            yield _sse({"type": "error", "message": "請提供履歷檔案或文字"})
+            return
+        try:
+            yield _sse({"type": "progress", "step": "structure", "message": "解析履歷中…"})
+            profile = structure_profile(text)
+            queries = derive_queries(profile)
+            yield _sse({"type": "queries", "queries": queries})
+
+            seen: set[str] = set()
+            all_jobs = []
+            for q in queries[:2]:
+                yield _sse({"type": "progress", "step": "search", "message": f"搜尋「{q}」中…"})
+                for res in search_all(q, limit=10):
+                    yield _sse({"type": "source", "source": res.source,
+                                "count": len(res.jobs), "blocked": res.blocked})
+                    for j in res.jobs:
+                        key = j.url or (j.title + j.company)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        all_jobs.append(j)
+
+            yield _sse({"type": "progress", "step": "rank",
+                        "message": f"依履歷排序 {len(all_jobs)} 筆職缺…"})
+            matches = rank_jobs(profile, all_jobs, top_k=12)
+            yield _sse({"type": "jobs", "data": [m.model_dump() for m in matches]})
+            yield _sse({"type": "linkedin", "url": linkedin_search_url(queries[0] if queries else "")})
+            yield _sse({"type": "done"})
+        except Exception as exc:  # LLM/網路錯誤：友善降級
             yield _sse({"type": "error",
                         "message": f"AI 服務暫時無法使用，請稍後再試。（{type(exc).__name__}）"})
 

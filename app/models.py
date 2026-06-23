@@ -117,3 +117,33 @@ class ResumeAssessment(BaseModel):
     strengths: list[str] = Field(default_factory=list, description="優點清單")
     issues: list[ResumeIssue] = Field(default_factory=list, description="問題清單")
     rewrite_examples: list[ResumeRewrite] = Field(default_factory=list, description="改寫範例")
+
+
+class JobPosting(BaseModel):
+    """正規化後的單一職缺。"""
+    source: str = Field(description="104 | cake | yourator | linkedin | url")
+    title: str
+    company: str
+    location: str | None = None
+    salary: str | None = None
+    url: str
+    snippet: str | None = Field(default=None, description="職缺摘要")
+    requirements: list[str] = Field(default_factory=list)
+    raw_text: str = Field(default="", description="原始職缺全文，供後續解析")
+
+
+class JobMatch(BaseModel):
+    """職缺對履歷的適配評分。"""
+    job: JobPosting
+    fit_score: int = Field(ge=0, le=100, description="適配分數")
+    matched: list[str] = Field(default_factory=list, description="符合點")
+    gaps: list[str] = Field(default_factory=list, description="落差點")
+    reason: str = Field(default="", description="為什麼適合/不適合")
+
+
+class SearchResult(BaseModel):
+    """單一來源的搜尋結果（被擋或錯誤時 blocked=True）。"""
+    source: str
+    jobs: list[JobPosting] = Field(default_factory=list)
+    blocked: bool = Field(default=False)
+    error: str | None = None
