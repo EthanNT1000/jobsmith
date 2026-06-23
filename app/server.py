@@ -3,13 +3,15 @@ import json
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 from langgraph.types import Command
 
 from app.cli import load_profile
 from app.graph import build_graph
+from app.intake.resume_parser import extract_text
+from app.agents.resume_eval import structure_profile, evaluate_resume
 
 app = FastAPI(title="台灣 AI 求職 Co-pilot")
 
@@ -69,6 +71,33 @@ class RunBody(BaseModel):
 class ResumeBody(BaseModel):
     thread_id: str
     decision: str
+
+
+@app.post("/api/resume/evaluate")
+async def resume_evaluate(
+    file: UploadFile | None = File(default=None),
+    resume_text: str = Form(default=""),
+):
+    if file is not None:
+        data = await file.read()
+        text = extract_text(data, file.filename or "resume.txt")
+    else:
+        text = resume_text
+
+    def gen():
+        yield _sse({"type": "start"})
+        if not text.strip():
+            yield _sse({"type": "error", "message": "請提供履歷檔案或文字"})
+            return
+        yield _sse({"type": "progress", "step": "structure", "message": "解析履歷中…"})
+        profile = structure_profile(text)
+        yield _sse({"type": "profile", "data": profile})
+        yield _sse({"type": "progress", "step": "evaluate", "message": "健檢評估中…"})
+        assessment = evaluate_resume(text, profile)
+        yield _sse({"type": "assessment", "data": assessment})
+        yield _sse({"type": "done"})
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @app.get("/api/sample")

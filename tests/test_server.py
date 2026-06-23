@@ -82,3 +82,31 @@ def test_index_serves_html():
     assert r.status_code == 200
     assert "<html" in r.text.lower()
     assert "求職" in r.text  # 確認是我們的頁面而非佔位
+
+
+def test_resume_evaluate_with_text(monkeypatch):
+    from app.models import Profile, ResumeAssessment
+    monkeypatch.setattr(server_mod, "structure_profile",
+                        lambda text: Profile(name="王小明", summary="後端工程師", raw_text=text))
+    monkeypatch.setattr(server_mod, "evaluate_resume",
+                        lambda text, profile: ResumeAssessment(
+                            overall_score=80, clarity_score=80, impact_score=80,
+                            ats_keyword_score=80, localization_score=80,
+                            completeness_score=80, summary="不錯"))
+    client = TestClient(server_mod.app)
+    r = client.post("/api/resume/evaluate", data={"resume_text": "我的履歷 Python"})
+    assert r.status_code == 200
+    events = _parse_sse(r.text)
+    types = [e["type"] for e in events]
+    assert types[0] == "start"
+    assert "assessment" in types
+    assert types[-1] == "done"
+    assessment_ev = next(e for e in events if e["type"] == "assessment")
+    assert assessment_ev["data"]["overall_score"] == 80
+
+
+def test_resume_evaluate_empty_returns_error():
+    client = TestClient(server_mod.app)
+    r = client.post("/api/resume/evaluate", data={"resume_text": "   "})
+    events = _parse_sse(r.text)
+    assert any(e["type"] == "error" for e in events)
