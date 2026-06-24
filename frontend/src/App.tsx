@@ -1,6 +1,6 @@
 import { useState } from "react"
 import type { ReactNode } from "react"
-import type { Seed } from "./types"
+import type { Seed, UserProfile } from "./types"
 import { JobSearchView } from "./views/JobSearchView"
 import { ResumeHealthView } from "./views/ResumeHealthView"
 import { PipelineView } from "./views/PipelineView"
@@ -11,8 +11,8 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("search")
   const [seed, setSeed] = useState<Seed | null>(null)
 
-  function pickJob(jd: string) {
-    setSeed({ jd, nonce: Date.now() })
+  function pickJob(jd: string, profile?: UserProfile | null) {
+    setSeed({ jd, profile, nonce: Date.now() })
     setTab("pipeline")
   }
 

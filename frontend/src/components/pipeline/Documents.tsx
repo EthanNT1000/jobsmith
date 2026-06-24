@@ -53,7 +53,11 @@ export function MatchCard({ m }: { m: MatchReport }) {
 export function CompanyCard({ c }: { c: CompanyBrief }) {
   return (
     <Section title={`⑧ 公司情報：${c.company}`}>
-      {c.data_limited && <p className="text-xs text-amber-600 mb-2">（公開資料有限，建議自行補查）</p>}
+      {(c.note || c.data_limited) && (
+        <p className="text-xs text-amber-600 mb-2">
+          （{c.note || "公開資料有限，建議自行補查"}）
+        </p>
+      )}
       <dl className="grid grid-cols-2 gap-2 text-sm">
         {c.industry && <><dt className="text-slate-500">產業</dt><dd>{c.industry}</dd></>}
         {c.size && <><dt className="text-slate-500">規模</dt><dd>{c.size}</dd></>}

@@ -76,6 +76,104 @@ def test_run_stop_path_finishes_without_interrupt(monkeypatch):
     assert types[-1] == "done"
 
 
+def test_run_uses_posted_profile_not_demo(monkeypatch):
+    # 核心修正：投遞包必須用使用者真實履歷，而非 data/demo_profile.json 的假人
+    _patch_agents(monkeypatch)
+    seen = {}
+
+    def capture(job, profile, feedback=None):
+        seen["name"] = profile.name
+        return TailoredResume(summary="履歷")
+    monkeypatch.setattr(graph_mod, "tailor_resume", capture)
+
+    client = TestClient(server_mod.app)
+    r = client.post("/api/run", json={
+        "jd_text": "JD",
+        "profile": {"name": "測試真人", "summary": "資深 Agent 工程師", "skills": ["LangGraph"]},
+    })
+    assert r.status_code == 200
+    _parse_sse(r.text)
+    assert seen["name"] == "測試真人"      # 用 posted profile
+    assert seen["name"] != "陳小安"        # 不是 demo profile
+
+
+def test_run_falls_back_to_demo_profile_when_absent(monkeypatch):
+    _patch_agents(monkeypatch)
+    seen = {}
+
+    def capture(job, profile, feedback=None):
+        seen["name"] = profile.name
+        return TailoredResume(summary="履歷")
+    monkeypatch.setattr(graph_mod, "tailor_resume", capture)
+
+    client = TestClient(server_mod.app)
+    r = client.post("/api/run", json={"jd_text": "JD"})  # 不帶 profile
+    _parse_sse(r.text)
+    assert seen["name"] == "陳小安"        # 後備 demo profile
+
+
+def test_run_degrades_gracefully_on_agent_failure(monkeypatch):
+    # 單一 agent 例外不應炸掉整條 SSE：仍走到人工關卡，並發 node_error 提示
+    _patch_agents(monkeypatch)
+
+    def boom(job, profile, feedback=None):
+        raise RuntimeError("LLM 暫時爆了")
+    monkeypatch.setattr(graph_mod, "tailor_resume", boom)
+
+    client = TestClient(server_mod.app)
+    r = client.post("/api/run", json={"jd_text": "JD"})
+    events = _parse_sse(r.text)
+    types = [e["type"] for e in events]
+    assert "node_error" in types
+    assert types[-1] == "interrupt"        # 流程沒被中斷
+    err = next(e for e in events if e["type"] == "node_error")
+    assert err["node"] == "resume_tailor"
+
+
+def test_jobs_auto_falls_back_when_all_blocked(monkeypatch):
+    from app.models import Profile, JobMatch, SearchResult
+    monkeypatch.setattr(server_mod, "structure_profile",
+                        lambda text: Profile(name="王", summary="後端", raw_text=text))
+    monkeypatch.setattr(server_mod, "derive_queries", lambda profile: ["AI 工程師"])
+    # 所有來源都被擋 → 無 job
+    monkeypatch.setattr(server_mod, "search_all",
+                        lambda q, limit=10: [SearchResult(source="104", blocked=True)])
+    captured = {}
+
+    def fake_rank(profile, jobs, top_k=12):
+        captured["n"] = len(jobs)
+        return [JobMatch(job=jobs[0], fit_score=50, reason="範例")] if jobs else []
+    monkeypatch.setattr(server_mod, "rank_jobs", fake_rank)
+
+    client = TestClient(server_mod.app)
+    r = client.post("/api/jobs/auto", data={"resume_text": "我的履歷"})
+    events = _parse_sse(r.text)
+    types = [e["type"] for e in events]
+    assert "all_blocked" in types          # 誠實告知來源失敗
+    assert captured["n"] > 0               # 改用後備樣本職缺
+    jobs_ev = next(e for e in events if e["type"] == "jobs")
+    assert jobs_ev["fallback"] is True
+
+
+def test_jobs_auto_emits_profile_event(monkeypatch):
+    from app.models import Profile, JobPosting, JobMatch, SearchResult
+    monkeypatch.setattr(server_mod, "structure_profile",
+                        lambda text: Profile(name="王小明", summary="後端", raw_text=text,
+                                             skills=["Python"]))
+    monkeypatch.setattr(server_mod, "derive_queries", lambda profile: ["AI 工程師"])
+    monkeypatch.setattr(server_mod, "search_all",
+                        lambda q, limit=10: [SearchResult(source="104", jobs=[
+                            JobPosting(source="104", title="AI", company="C", url="u1")])])
+    monkeypatch.setattr(server_mod, "rank_jobs",
+                        lambda profile, jobs, top_k=12: [JobMatch(job=jobs[0], fit_score=80)])
+    client = TestClient(server_mod.app)
+    r = client.post("/api/jobs/auto", data={"resume_text": "履歷"})
+    events = _parse_sse(r.text)
+    prof = next(e for e in events if e["type"] == "profile")
+    assert prof["data"]["name"] == "王小明"
+    assert "raw_text" not in prof["data"]  # 不回傳全文
+
+
 def test_index_serves_html():
     client = TestClient(server_mod.app)
     r = client.get("/")

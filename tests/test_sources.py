@@ -31,6 +31,34 @@ def test_source_104_parses(monkeypatch):
     assert "Python" in j.snippet and "[[[" not in j.snippet
 
 
+def test_source_104_salary_from_low_high(monkeypatch):
+    # 真實 104 回傳：salaryDesc 不存在，數值在 salaryLow/salaryHigh + 型態碼 s10
+    payload = {"data": [
+        {"jobName": "月薪職", "custName": "A", "salaryLow": 48000, "salaryHigh": 70000,
+         "s10": 50, "link": {"job": "https://x/1"}},
+        {"jobName": "年薪職", "custName": "B", "salaryLow": 800000, "salaryHigh": 1300000,
+         "s10": 60, "link": {"job": "https://x/2"}},
+        {"jobName": "面議職", "custName": "C", "salaryLow": 0, "salaryHigh": 0,
+         "s10": 10, "link": {"job": "https://x/3"}},
+    ]}
+    monkeypatch.setattr(source_104, "http_get", lambda *a, **k: FakeResp(json_data=payload))
+    res = source_104.search("AI", limit=5)
+    salaries = [j.salary for j in res.jobs]
+    assert salaries[0] == "月薪 NT$48,000–70,000"
+    assert salaries[1] == "年薪 NT$800,000–1,300,000"
+    assert salaries[2] == "面議"
+
+
+def test_source_104_ignores_legacy_salarydesc(monkeypatch):
+    # 即使有舊的 salaryDesc 字串也不再採用，一律以 low/high 計算
+    payload = {"data": [{"jobName": "x", "custName": "A", "salaryDesc": "舊字串",
+                         "salaryLow": 40000, "salaryHigh": 50000, "s10": 50,
+                         "link": {"job": "https://x/1"}}]}
+    monkeypatch.setattr(source_104, "http_get", lambda *a, **k: FakeResp(json_data=payload))
+    j = source_104.search("AI").jobs[0]
+    assert j.salary == "月薪 NT$40,000–50,000"
+
+
 def test_source_104_blocked_on_error(monkeypatch):
     def boom(*a, **k):
         raise ConnectionError("nope")

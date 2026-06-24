@@ -27,7 +27,7 @@ export interface CompanyBrief {
   company: string; size?: string | null; industry?: string | null; funding?: string | null;
   salary_range?: string | null; benefits: string[]; culture_summary?: string | null;
   interview_reviews?: string | null; red_flags: string[]; recent_news: string[];
-  sources: string[]; data_limited: boolean;
+  sources: string[]; data_limited: boolean; note?: string | null;
 }
 export interface TailoredResume {
   summary: string; bullets: string[]; ats_keywords_hit: string[];
@@ -59,4 +59,8 @@ export interface JobPosting {
 export interface JobMatch {
   job: JobPosting; fit_score: number; matched: string[]; gaps: string[]; reason: string;
 }
-export interface Seed { jd: string; nonce: number }
+// 使用者真實履歷結構（後端 /api/jobs/auto 與 /api/resume/evaluate 的 profile 事件，已排除 raw_text）
+export type UserProfile = Record<string, unknown>
+
+// 從職缺列表「產生投遞包」時，帶 JD + 使用者真實履歷進 pipeline（profile 缺省則後端用 demo）
+export interface Seed { jd: string; profile?: UserProfile | null; nonce: number }

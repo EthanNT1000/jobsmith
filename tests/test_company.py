@@ -38,3 +38,18 @@ def test_research_company_handles_search_failure(monkeypatch):
     brief = company_mod.research_company("壞掉公司")
 
     assert brief.data_limited is True
+
+
+def test_research_company_llm_only_when_no_key(monkeypatch):
+    # 未設金鑰：search_web 拋含 TAVILY_API_KEY 的錯 → 改用 LLM 一般知識 brief
+    def no_key(q, **k):
+        raise RuntimeError("TAVILY_API_KEY 未設定，無法執行搜尋")
+    monkeypatch.setattr(company_mod, "search_web", no_key)
+    canned = CompanyBrief(company="某公司", industry="軟體", culture_summary="工程導向")
+    monkeypatch.setattr(company_mod, "get_llm", lambda tier: FakeLLM(canned))
+
+    brief = company_mod.research_company("某公司")
+
+    assert brief.industry == "軟體"
+    assert brief.data_limited is True          # 一般知識 → 標記資料有限
+    assert brief.note and "金鑰" in brief.note  # 提醒使用者自行查證

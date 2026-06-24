@@ -1,39 +1,48 @@
 import { useState } from "react"
 import type { ChangeEvent } from "react"
-import type { JobMatch } from "../types"
+import type { JobMatch, UserProfile } from "../types"
 import { readSSE } from "../sse"
 import { SAMPLE_RESUME } from "../sampleResume"
 
-const SRC_LABEL: Record<string, string> = { "104": "104", yourator: "Yourator", cake: "Cake" }
+const SRC_LABEL: Record<string, string> = {
+  "104": "104", yourator: "Yourator", cake: "Cake", sample: "範例",
+}
 
 function fitColor(s: number) {
   return s >= 80 ? "bg-emerald-600" : s >= 60 ? "bg-amber-500" : "bg-slate-400"
 }
 
-export function JobSearchView({ onPick }: { onPick: (jd: string) => void }) {
+export function JobSearchView({ onPick }: { onPick: (jd: string, profile?: UserProfile | null) => void }) {
   const [text, setText] = useState("")
   const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(false)
   const [status, setStatus] = useState("")
   const [queries, setQueries] = useState<string[]>([])
   const [sources, setSources] = useState<{ source: string; count: number; blocked: boolean }[]>([])
   const [jobs, setJobs] = useState<JobMatch[]>([])
   const [linkedin, setLinkedin] = useState("")
+  const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [blockedNote, setBlockedNote] = useState("")
+  const [fallback, setFallback] = useState(false)
   const [error, setError] = useState("")
 
   async function go(form: FormData) {
-    setBusy(true); setError(""); setJobs([]); setQueries([]); setSources([]); setLinkedin("")
+    setBusy(true); setDone(false); setError(""); setJobs([]); setQueries([]); setSources([])
+    setLinkedin(""); setProfile(null); setBlockedNote(""); setFallback(false)
     setStatus("上傳中…")
     try {
       const resp = await fetch("/api/jobs/auto", { method: "POST", body: form })
       await readSSE(resp, (ev) => {
         if (ev.type === "progress") setStatus(ev.message)
+        else if (ev.type === "profile") setProfile(ev.data as UserProfile)
         else if (ev.type === "queries") setQueries(ev.queries)
         else if (ev.type === "source")
           setSources((s) => [...s, { source: ev.source, count: ev.count, blocked: ev.blocked }])
-        else if (ev.type === "jobs") setJobs(ev.data as JobMatch[])
+        else if (ev.type === "all_blocked") setBlockedNote(ev.message)
+        else if (ev.type === "jobs") { setJobs(ev.data as JobMatch[]); setFallback(Boolean(ev.fallback)) }
         else if (ev.type === "linkedin") setLinkedin(ev.url)
         else if (ev.type === "error") setError(ev.message)
-        else if (ev.type === "done") setStatus("完成 ✅")
+        else if (ev.type === "done") setDone(true)
       })
     } catch {
       setError("連線發生問題，請確認伺服器是否啟動。")
@@ -62,7 +71,7 @@ export function JobSearchView({ onPick }: { onPick: (jd: string) => void }) {
       j.snippet || "",
       j.requirements.length ? `\n需求：${j.requirements.join("、")}` : "",
     ].filter(Boolean).join("\n")
-    onPick(jd)
+    onPick(jd, profile)
   }
 
   return (
@@ -105,12 +114,36 @@ export function JobSearchView({ onPick }: { onPick: (jd: string) => void }) {
         )}
       </div>
 
+      {blockedNote && (
+        <div className="mb-3 text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3">
+          {blockedNote}
+        </div>
+      )}
+
       {jobs.length > 0 && (
         <div className="flex items-center justify-between mb-2">
-          <h2 className="font-semibold">推薦職缺（依適配度排序）</h2>
+          <h2 className="font-semibold">
+            推薦職缺（依適配度排序）
+            {fallback && (
+              <span className="ml-2 text-xs font-normal bg-amber-100 text-amber-700 rounded-full px-2 py-0.5">
+                範例資料
+              </span>
+            )}
+          </h2>
           {linkedin && (
             <a href={linkedin} target="_blank" rel="noreferrer"
               className="text-sm text-indigo-600 underline">也到 LinkedIn 搜尋 ↗</a>
+          )}
+        </div>
+      )}
+
+      {done && jobs.length === 0 && !error && (
+        <div className="text-center text-slate-500 bg-white border rounded-xl p-8">
+          <p className="font-medium text-slate-700">這次沒有取得職缺結果</p>
+          <p className="text-sm mt-1">即時來源可能暫時被擋，可調整履歷關鍵字再試，或</p>
+          {linkedin && (
+            <a href={linkedin} target="_blank" rel="noreferrer"
+              className="inline-block mt-2 text-sm text-indigo-600 underline">直接到 LinkedIn 搜尋 ↗</a>
           )}
         </div>
       )}

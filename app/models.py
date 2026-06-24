@@ -52,6 +52,7 @@ class CompanyBrief(BaseModel):
     recent_news: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list, description="來源連結")
     data_limited: bool = Field(default=False, description="查無足夠公開資料時為 True")
+    note: str | None = Field(default=None, description="降級原因/提醒（如未設搜尋金鑰）")
 
 
 class TailoredResume(BaseModel):

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import type { PipelineState, Seed } from "../types"
+import type { PipelineState, Seed, UserProfile } from "../types"
 import { readSSE } from "../sse"
 import { AgentTrace } from "../components/pipeline/AgentTrace"
 import {
@@ -16,6 +16,7 @@ export function PipelineView({ seed, onBack }: { seed?: Seed | null; onBack?: ()
   const [state, setState] = useState<PipelineState>({})
   const [threadId, setThreadId] = useState("")
   const [revisions, setRevisions] = useState(0)
+  const [nodeErrors, setNodeErrors] = useState<{ node: string; message: string }[]>([])
   const [error, setError] = useState("")
 
   function handle(ev: any) {
@@ -25,22 +26,25 @@ export function PipelineView({ seed, onBack }: { seed?: Seed | null; onBack?: ()
       setDone((d) => [...d, ev.node])
       if (ev.data) setState((s) => ({ ...s, ...ev.data }))
       if (ev.node === "critic" && ev.data?.revision_count) setRevisions(ev.data.revision_count)
+    } else if (ev.type === "node_error") {
+      setNodeErrors((e) => [...e, { node: ev.node, message: ev.message }])
     } else if (ev.type === "interrupt") {
       setThreadId(ev.thread_id); setPhase("approval"); setStatus("待人工核可")
     } else if (ev.type === "done") {
       setPhase((p) => (p === "approval" ? p : "done")); setStatus("完成 ✅")
     } else if (ev.type === "error") {
-      setError(ev.message || "發生錯誤")
+      setError(ev.message || "發生錯誤"); setPhase("done"); setStatus("")
     }
   }
 
-  async function run(jdText: string = jd) {
+  async function run(jdText: string = jd, profile?: UserProfile | null) {
     if (!jdText.trim()) return
-    setError(""); setDone([]); setState({}); setRevisions(0); setPhase("running"); setStatus("啟動中…")
+    setError(""); setNodeErrors([]); setDone([]); setState({}); setRevisions(0)
+    setPhase("running"); setStatus("啟動中…")
     try {
       const resp = await fetch("/api/run", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jd_text: jdText }),
+        body: JSON.stringify({ jd_text: jdText, profile: profile ?? null }),
       })
       await readSSE(resp, handle)
       setPhase((p) => (p === "approval" ? p : "done"))
@@ -68,9 +72,9 @@ export function PipelineView({ seed, onBack }: { seed?: Seed | null; onBack?: ()
     setJd(j.jd_text)
   }
 
-  // 從「自動找職缺」點選某職缺帶 JD 進來 → 自動開跑
+  // 從「自動找職缺」點選某職缺帶 JD + 真實履歷進來 → 自動開跑（投遞包用本人背景）
   useEffect(() => {
-    if (seed?.jd) { setJd(seed.jd); run(seed.jd) }
+    if (seed?.jd) { setJd(seed.jd); run(seed.jd, seed.profile) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.nonce])
 
@@ -122,6 +126,15 @@ export function PipelineView({ seed, onBack }: { seed?: Seed | null; onBack?: ()
           )}
           {state.approved === true && <div className="no-print text-sm text-emerald-700">✅ 已核可</div>}
           {state.approved === false && <div className="no-print text-sm text-rose-700">↩︎ 已退回</div>}
+
+          {nodeErrors.length > 0 && (
+            <div className="no-print bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
+              <p className="font-medium mb-1">部分環節降級（已用替代內容續跑，可重試提升品質）</p>
+              <ul className="list-disc pl-5 space-y-0.5">
+                {nodeErrors.map((e, i) => <li key={i}>{e.node}：{e.message}</li>)}
+              </ul>
+            </div>
+          )}
 
           {state.match_report && <MatchCard m={state.match_report} />}
           {state.company_brief && <CompanyCard c={state.company_brief} />}

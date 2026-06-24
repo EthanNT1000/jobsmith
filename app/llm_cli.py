@@ -35,15 +35,35 @@ def _messages_to_prompt(messages) -> tuple[str, str]:
 
 
 def _extract_json(text: str) -> str:
-    """從模型輸出抽出 JSON：去除 ```json 圍欄，否則取第一個 { 到最後一個 }。"""
+    """抽出第一個完整 JSON 物件：去 markdown 圍欄後用平衡括號掃描（巢狀安全、忽略字串內括號）。"""
     text = (text or "").strip()
-    fence = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
-    if fence:
-        return fence.group(1)
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        return text[start:end + 1]
-    return text
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text).strip()
+    start = text.find("{")
+    if start == -1:
+        return text
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return text[start:]  # 未閉合 → 交給驗證報錯
 
 
 def _schema_instruction(schema_model: Type[BaseModel]) -> str:
@@ -57,6 +77,35 @@ def _schema_instruction(schema_model: Type[BaseModel]) -> str:
 
 def _parse_into(schema_model: Type[BaseModel], raw: str) -> BaseModel:
     return schema_model.model_validate_json(_extract_json(raw))
+
+
+def _repair_hint(exc: ValidationError) -> str:
+    """把 Pydantic 欄位級錯誤回灌提示，引導模型針對性修正（而非通用嘮叨）。"""
+    problems = []
+    for e in exc.errors()[:8]:
+        loc = ".".join(str(p) for p in e.get("loc", ())) or "(root)"
+        problems.append(f"- 欄位 `{loc}`：{e.get('msg')}")
+    return ("上次輸出不符合 schema，請修正下列欄位後，重新只輸出一個合法 JSON 物件："
+            "\n" + "\n".join(problems))
+
+
+def _structured_loop(run_prompt, schema, messages):
+    """共用結構化輸出迴圈：組提示 → 跑 → 抽/驗 → 失敗帶欄位錯誤重試。"""
+    system, human = _messages_to_prompt(messages)
+    base = f"{system}\n\n{human}\n\n{_schema_instruction(schema)}"
+    prompt = base
+    last_err = None
+    for _ in range(_MAX_TRIES):
+        raw = run_prompt(prompt)
+        try:
+            return _parse_into(schema, raw)
+        except ValidationError as exc:
+            last_err = exc
+            prompt = base + "\n\n" + _repair_hint(exc)
+        except json.JSONDecodeError as exc:
+            last_err = exc
+            prompt = base + "\n\n（上次輸出不是合法 JSON，請只輸出一個合法 JSON 物件，不要任何其他文字）"
+    raise RuntimeError(f"CLI 結構化輸出解析失敗：{last_err}") from last_err
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +136,7 @@ def _run_claude(prompt: str, model: str) -> str:
 
 
 class _CLIStructured:
-    """通用結構化包裝：呼叫 runner、抽 JSON、驗證、失敗重試。"""
+    """通用結構化包裝：呼叫 runner、抽 JSON、驗證、失敗帶欄位錯誤重試。"""
 
     def __init__(self, runner, model, schema):
         self._runner = runner
@@ -95,18 +144,8 @@ class _CLIStructured:
         self._schema = schema
 
     def invoke(self, messages):
-        system, human = _messages_to_prompt(messages)
-        base = f"{system}\n\n{human}\n\n{_schema_instruction(self._schema)}"
-        prompt = base
-        last_err = None
-        for _ in range(_MAX_TRIES):
-            raw = self._runner(prompt, self._model)
-            try:
-                return _parse_into(self._schema, raw)
-            except (ValidationError, json.JSONDecodeError) as exc:
-                last_err = exc
-                prompt = base + "\n\n（上次輸出無法解析為合法 JSON，請重新只輸出合法 JSON 物件）"
-        raise RuntimeError(f"CLI 結構化輸出解析失敗：{last_err}") from last_err
+        return _structured_loop(
+            lambda prompt: self._runner(prompt, self._model), self._schema, messages)
 
 
 class ClaudeCLIChat:
@@ -160,18 +199,7 @@ class _CodexStructured:
         self._schema = schema
 
     def invoke(self, messages):
-        system, human = _messages_to_prompt(messages)
-        base = f"{system}\n\n{human}\n\n{_schema_instruction(self._schema)}"
-        prompt = base
-        last_err = None
-        for _ in range(_MAX_TRIES):
-            raw = _run_codex(prompt)
-            try:
-                return _parse_into(self._schema, raw)
-            except (ValidationError, json.JSONDecodeError) as exc:
-                last_err = exc
-                prompt = base + "\n\n（上次輸出無法解析為合法 JSON，請重新只輸出合法 JSON 物件）"
-        raise RuntimeError(f"CLI 結構化輸出解析失敗：{last_err}") from last_err
+        return _structured_loop(_run_codex, self._schema, messages)
 
 
 class CodexCLIChat:

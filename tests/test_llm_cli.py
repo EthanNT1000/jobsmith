@@ -31,6 +31,39 @@ def test_extract_json_embedded():
     assert json.loads(cli._extract_json(raw))["a"] == 3
 
 
+def test_extract_json_nested_object():
+    # 巢狀物件：舊的「第一個 { 到最後一個 }」在有後綴雜訊時會壞，平衡掃描要正確
+    raw = '前言 {"outer": {"inner": [1, 2]}, "name": "王"} 後綴'
+    obj = json.loads(cli._extract_json(raw))
+    assert obj["outer"]["inner"] == [1, 2] and obj["name"] == "王"
+
+
+def test_extract_json_stops_at_first_complete_object():
+    raw = '{"a": 1} 然後又冒出一段 {"b": 2}'
+    assert json.loads(cli._extract_json(raw)) == {"a": 1}
+
+
+def test_extract_json_brace_inside_string():
+    raw = '{"note": "包含 } 與 { 大括號", "score": 7}'
+    assert json.loads(cli._extract_json(raw))["score"] == 7
+
+
+def test_claude_structured_repairs_validation_error(monkeypatch):
+    # 驗證失敗時，重試提示要帶欄位級錯誤（提到缺少的 score），而非通用嘮叨
+    prompts = []
+    calls = {"n": 0}
+
+    def runner(prompt, model):
+        prompts.append(prompt)
+        calls["n"] += 1
+        return '{"name": "x"}' if calls["n"] == 1 else '{"name": "x", "score": 9}'
+
+    monkeypatch.setattr(cli, "_run_claude", runner)
+    out = cli.ClaudeCLIChat("haiku").with_structured_output(Toy).invoke([("human", "h")])
+    assert out.score == 9 and calls["n"] == 2
+    assert "score" in prompts[1]
+
+
 def test_claude_structured_parses(monkeypatch):
     monkeypatch.setattr(cli, "_run_claude", lambda prompt, model: '{"name": "王", "score": 88}')
     llm = cli.ClaudeCLIChat("opus")

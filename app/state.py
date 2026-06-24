@@ -1,5 +1,6 @@
 """LangGraph 共享狀態。"""
-from typing import TypedDict
+import operator
+from typing import Annotated, TypedDict
 
 from app.models import (
     Profile, ParsedJob, MatchReport,
@@ -19,3 +20,6 @@ class CopilotState(TypedDict):
     critique: CritiqueReport | None
     revision_count: int
     approved: bool | None
+    # 優雅降級：任一節點 agent 失敗時附加 {node, message}，不中斷整條流程。
+    # 用 operator.add 當 reducer，平行生成節點同時失敗也不會互蓋。
+    errors: Annotated[list[dict], operator.add]

@@ -11,6 +11,7 @@ from langgraph.types import Command
 
 from app.cli import load_profile
 from app.graph import build_graph
+from app.models import Profile
 from app.intake.resume_parser import extract_text
 from app.agents.resume_eval import structure_profile, evaluate_resume
 from app.agents.job_search import derive_queries, rank_jobs
@@ -53,7 +54,12 @@ def _stream(graph_input, config):
         for node, update in chunk.items():
             if node == "__interrupt__":
                 continue
-            yield _sse({"type": "node", "node": node, "data": serialize_update(update or {})})
+            update = update or {}
+            # 優雅降級：該節點 agent 失敗（已回降級 artifact）時，額外發 node_error 提示前端。
+            for err in update.get("errors") or []:
+                yield _sse({"type": "node_error", "node": err.get("node", node),
+                            "message": err.get("message", "")})
+            yield _sse({"type": "node", "node": node, "data": serialize_update(update)})
     snapshot = GRAPH.get_state(config)
     if snapshot.next:  # 還有待跑節點 → 停在 human_gate interrupt
         payload = {}
@@ -71,6 +77,9 @@ def _stream(graph_input, config):
 
 class RunBody(BaseModel):
     jd_text: str
+    # 使用者真實履歷結構（由 /api/jobs/auto 或 /api/resume/evaluate 的 profile 事件帶入）。
+    # 缺省時才退回 demo profile（CLI / 測試後備）。
+    profile: dict | None = None
     profile_path: str = "data/demo_profile.json"
 
 
@@ -79,13 +88,15 @@ class ResumeBody(BaseModel):
     decision: str
 
 
+# 注意：以下兩個串流端點用一般 def（非 async def），讓 Starlette 在 threadpool 執行
+# 同步產生器，避免 claude_cli 的同步 subprocess 阻塞事件迴圈、卡住其他請求。
 @app.post("/api/resume/evaluate")
-async def resume_evaluate(
+def resume_evaluate(
     file: UploadFile | None = File(default=None),
     resume_text: str = Form(default=""),
 ):
     if file is not None:
-        data = await file.read()
+        data = file.file.read()
         text = extract_text(data, file.filename or "resume.txt")
     else:
         text = resume_text
@@ -111,13 +122,13 @@ async def resume_evaluate(
 
 
 @app.post("/api/jobs/auto")
-async def jobs_auto(
+def jobs_auto(
     file: UploadFile | None = File(default=None),
     resume_text: str = Form(default=""),
 ):
     """履歷 → 自動找職缺：解析履歷 → 推導關鍵字 → 搜尋多站 → 依履歷排序。"""
     if file is not None:
-        data = await file.read()
+        data = file.file.read()
         text = extract_text(data, file.filename or "resume.txt")
     else:
         text = resume_text
@@ -130,14 +141,19 @@ async def jobs_auto(
         try:
             yield _sse({"type": "progress", "step": "structure", "message": "解析履歷中…"})
             profile = structure_profile(text)
+            # 把使用者真實履歷結構送給前端，供「產生投遞包」時帶入 pipeline（非 demo）。
+            yield _sse({"type": "profile", "data": profile.model_dump(exclude={"raw_text"})})
             queries = derive_queries(profile)
             yield _sse({"type": "queries", "queries": queries})
 
             seen: set[str] = set()
             all_jobs = []
+            all_blocked = True
             for q in queries[:2]:
                 yield _sse({"type": "progress", "step": "search", "message": f"搜尋「{q}」中…"})
                 for res in search_all(q, limit=10):
+                    if not res.blocked:
+                        all_blocked = False
                     yield _sse({"type": "source", "source": res.source,
                                 "count": len(res.jobs), "blocked": res.blocked})
                     for j in res.jobs:
@@ -147,10 +163,20 @@ async def jobs_auto(
                         seen.add(key)
                         all_jobs.append(j)
 
+            # 誠實降級：所有來源失敗或零結果 → 告知並改用後備樣本職缺，demo 永遠有東西看。
+            used_fallback = False
+            if not all_jobs:
+                used_fallback = True
+                yield _sse({"type": "all_blocked",
+                            "message": "即時職缺來源暫時取得不到結果，以下改用範例職缺示意，"
+                                       "並請改用下方 LinkedIn / 104 直連搜尋。"})
+                all_jobs = _load_fallback_jobs()
+
             yield _sse({"type": "progress", "step": "rank",
                         "message": f"依履歷排序 {len(all_jobs)} 筆職缺…"})
             matches = rank_jobs(profile, all_jobs, top_k=12)
-            yield _sse({"type": "jobs", "data": [m.model_dump() for m in matches]})
+            yield _sse({"type": "jobs", "data": [m.model_dump() for m in matches],
+                        "fallback": used_fallback})
             yield _sse({"type": "linkedin", "url": linkedin_search_url(queries[0] if queries else "")})
             yield _sse({"type": "done"})
         except Exception as exc:  # LLM/網路錯誤：友善降級
@@ -160,25 +186,45 @@ async def jobs_auto(
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
+def _load_fallback_jobs() -> list:
+    """來源全失敗時的後備樣本職缺（讓 demo/離線時仍有可排序內容）。"""
+    from app.models import JobPosting
+    path = _ROOT / "data" / "fallback_jobs.json"
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return [JobPosting(**j) for j in raw]
+    except Exception:
+        return []
+
+
 @app.get("/api/sample")
 def sample():
     jd = (_ROOT / "data" / "demo_jobs" / "ai_engineer.txt").read_text(encoding="utf-8")
     return {"jd_text": jd}
 
 
-@app.post("/api/run")
-def run(body: RunBody):
+def _resolve_profile(body: RunBody) -> Profile:
+    """優先用使用者真實履歷；缺省才退回 demo profile。"""
+    if body.profile:
+        data = dict(body.profile)
+        data.setdefault("raw_text", "")  # raw_text 為必填，前端事件已排除，補空字串
+        return Profile(**data)
     profile_path = body.profile_path
     if not Path(profile_path).is_absolute():
         profile_path = str(_ROOT / profile_path)
-    profile = load_profile(profile_path)
+    return load_profile(profile_path)
+
+
+@app.post("/api/run")
+def run(body: RunBody):
+    profile = _resolve_profile(body)
     thread_id = uuid.uuid4().hex
     config = {"configurable": {"thread_id": thread_id}}
     initial = {
         "jd_text": body.jd_text, "profile": profile,
         "parsed_job": None, "match_report": None, "company_brief": None,
         "tailored_resume": None, "cover_letter": None, "interview_kit": None,
-        "critique": None, "revision_count": 0, "approved": None,
+        "critique": None, "revision_count": 0, "approved": None, "errors": [],
     }
 
     def gen():

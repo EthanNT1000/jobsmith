@@ -104,6 +104,7 @@ def run(jd_path: str, profile_path: str = "data/demo_profile.json") -> CopilotSt
         "critique": None,
         "revision_count": 0,
         "approved": None,
+        "errors": [],
     }
     result = graph.invoke(initial, config)
 
