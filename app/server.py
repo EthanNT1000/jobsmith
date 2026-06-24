@@ -224,7 +224,11 @@ def jobs_auto(
             yield _sse({"type": "jobs", "data": [m.model_dump() for m in matches],
                         "fallback": used_fallback})
             from app.agents.skill_gap import analyze_skill_gap
-            gap = analyze_skill_gap(profile, resume_jobs)  # 技能缺口分析以 AI 搜尋結果為市場樣本
+            # 技能缺口只看「與履歷相關」的高適配職缺，避免行銷/業務等無關職缺污染缺口清單。
+            relevant_jobs = [m.job for m in matches if m.fit_score >= 50]
+            if len(relevant_jobs) < 5:
+                relevant_jobs = [m.job for m in matches[:15]]
+            gap = analyze_skill_gap(profile, relevant_jobs)
             if gap.top_demand:
                 yield _sse({"type": "skill_gap", "data": gap.model_dump()})
             yield _sse({"type": "linkedin", "url": linkedin_search_url(queries[0] if queries else "")})

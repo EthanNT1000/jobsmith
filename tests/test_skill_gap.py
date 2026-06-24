@@ -28,6 +28,17 @@ def test_skill_owned_as_substring_not_a_gap():
     assert "AI" in rep.have and "LLM" in rep.have
 
 
+def test_skill_in_summary_counts_as_owned():
+    # 技能只出現在摘要/職稱（不在 skills 欄位）也算具備：AI 工程師 → 具備「AI」。
+    jobs = [JobPosting(source="x", title="t", company="c", url="u", requirements=["AI", "Rust"])]
+    prof = Profile(name="a", summary="AI 工程師，專長 LLM 應用與多代理系統",
+                   skills=["Python"], raw_text="")
+    rep = analyze_skill_gap(prof, jobs)
+    gaps = {g.skill for g in rep.your_gaps}
+    assert "AI" not in gaps and "AI" in rep.have   # 摘要已涵蓋
+    assert "Rust" in gaps                            # 真的沒有
+
+
 def test_short_ascii_skill_uses_word_boundary():
     # 「ai」不應誤中含 ai 的無關字（rail / domain）。
     jobs = [JobPosting(source="x", title="t", company="c", url="u", requirements=["AI"])]

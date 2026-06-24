@@ -21,8 +21,12 @@ EVAL_SYSTEM = (
 
 
 def structure_profile(resume_text: str) -> Profile:
-    """履歷全文 → 結構化 Profile（cheap 分層）。"""
-    llm = get_llm("cheap").with_structured_output(Profile)
+    """履歷全文 → 結構化 Profile（standard 分層）。
+
+    用 sonnet 而非 haiku：履歷解析是後續匹配、排序、技能缺口、產出的共同上游，
+    haiku 抽取技能/定位容易漏（例如把「AI 工程師」的核心能力漏掉），改用 sonnet 較穩。
+    """
+    llm = get_llm("standard").with_structured_output(Profile)
     profile = llm.invoke([("system", STRUCTURE_SYSTEM), ("human", resume_text)])
     if not profile.raw_text:
         profile.raw_text = resume_text

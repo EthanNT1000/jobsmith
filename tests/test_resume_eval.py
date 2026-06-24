@@ -11,7 +11,8 @@ def test_structure_profile_returns_profile(monkeypatch):
     assert result.name == "王小明"
 
 
-def test_structure_profile_uses_cheap_tier(monkeypatch):
+def test_structure_profile_uses_standard_tier(monkeypatch):
+    # 履歷解析改用 sonnet（standard）：是後續匹配/排序/技能缺口的共同上游，要抽得準。
     seen = {}
     canned = Profile(name="x", summary="y", raw_text="z")
 
@@ -21,7 +22,7 @@ def test_structure_profile_uses_cheap_tier(monkeypatch):
 
     monkeypatch.setattr(mod, "get_llm", fake)
     mod.structure_profile("text")
-    assert seen["tier"] == "cheap"
+    assert seen["tier"] == "standard"
 
 
 def test_structure_profile_fills_raw_text_when_empty(monkeypatch):

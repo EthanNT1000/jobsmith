@@ -11,6 +11,7 @@ import { EmptyState } from "../ui/EmptyState"
 import { Search, Upload, Loader2, ExternalLink, Sparkles, AlertTriangle, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Target, Building2, X } from "../ui/icons"
 
 const PAGE_SIZE = 8
+const SNAP_KEY = "copilot.jobsearch.v1"  // 上次搜尋結果快取（重新整理/重開沿用）
 
 const SRC_LABEL: Record<string, string> = {
   "104": "104", yourator: "Yourator", linkedin: "LinkedIn", cake: "Cake", careers: "官網", sample: "範例",
@@ -121,6 +122,39 @@ export function JobSearchView(
   const [file, setFile] = useState<File | null>(null)
   // 這次送出時實際查詢的公司（用於「查無結果」提示，與輸入框內容脫鉤）。
   const [searchedCompanies, setSearchedCompanies] = useState<string[]>([])
+
+  // 還原上次搜尋結果：重新整理 / 重開不必重找。
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SNAP_KEY)
+      if (!raw) return
+      const s = JSON.parse(raw)
+      if (typeof s.text === "string") setText(s.text)
+      if (Array.isArray(s.companies)) setCompanies(s.companies)
+      if (Array.isArray(s.jobs)) setJobs(s.jobs)
+      if (Array.isArray(s.companyJobs)) setCompanyJobs(s.companyJobs)
+      if (s.skillGap) setSkillGap(s.skillGap)
+      if (Array.isArray(s.queries)) setQueries(s.queries)
+      if (Array.isArray(s.sources)) setSources(s.sources)
+      if (typeof s.linkedin === "string") setLinkedin(s.linkedin)
+      if (typeof s.fallback === "boolean") setFallback(s.fallback)
+      if (Array.isArray(s.searchedCompanies)) setSearchedCompanies(s.searchedCompanies)
+      if (s.profile) { setProfile(s.profile as UserProfile); onProfile?.(s.profile as UserProfile) }
+      if (Array.isArray(s.jobs) && s.jobs.length) setDone(true)
+    } catch { /* 忽略毀損快取 */ }
+  }, [])  // 僅開啟時還原一次
+
+  // 搜尋完成後保存快照（含結果、技能缺口、來源、profile）。
+  useEffect(() => {
+    if (!done) return
+    try {
+      localStorage.setItem(SNAP_KEY, JSON.stringify({
+        text, companies, jobs, companyJobs, skillGap, queries, sources,
+        linkedin, fallback, searchedCompanies, profile,
+      }))
+    } catch { /* localStorage 不可用/已滿則略過 */ }
+  }, [done, jobs, companyJobs, skillGap, queries, sources, linkedin, fallback,
+      searchedCompanies, profile, text, companies])
 
   function addCompany(name: string) {
     const n = name.trim()
