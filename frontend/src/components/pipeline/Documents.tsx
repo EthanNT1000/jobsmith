@@ -1,48 +1,64 @@
-import type { ReactNode } from "react"
+import type { ComponentType, ReactNode } from "react"
 import type {
   MatchReport, CompanyBrief, TailoredResume, CoverLetter, InterviewKit, CritiqueReport,
 } from "../../types"
 import { ScoreRing } from "../ScoreRing"
+import { Card } from "../../ui/Card"
+import { Badge } from "../../ui/Badge"
+import {
+  Target, Building2, FileText, Mail, MessageSquare, ShieldCheck,
+  CheckCircle2, AlertTriangle,
+} from "../../ui/icons"
 
-function Chips({ items, color }: { items: string[]; color: string }) {
+type Tone = "brand" | "emerald" | "amber" | "rose" | "slate"
+
+function Tags({ items, tone }: { items: string[]; tone: Tone }) {
   return (
-    <div className="flex flex-wrap gap-1">
-      {items.map((t, i) => (
-        <span key={i} className={`text-xs px-2 py-0.5 rounded-full ${color}`}>{t}</span>
-      ))}
+    <div className="flex flex-wrap gap-1.5">
+      {items.map((t, i) => <Badge key={i} tone={tone}>{t}</Badge>)}
     </div>
   )
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section(
+  { icon: Icon, title, children }:
+  { icon: ComponentType<{ className?: string }>; title: string; children: ReactNode },
+) {
   return (
-    <section className="border rounded-xl bg-white p-5">
-      <h3 className="font-bold mb-3">{title}</h3>
+    <Card className="p-5 avoid-break animate-fade-in-up">
+      <h3 className="font-bold mb-3 flex items-center gap-2 text-slate-900">
+        <span className="grid place-items-center w-7 h-7 rounded-lg bg-brand-50 text-brand-600">
+          <Icon className="w-4 h-4" />
+        </span>
+        {title}
+      </h3>
       {children}
-    </section>
+    </Card>
   )
+}
+
+function Label({ children }: { children: ReactNode }) {
+  return <p className="text-sm font-medium mt-3 mb-1.5 text-slate-700">{children}</p>
 }
 
 export function MatchCard({ m }: { m: MatchReport }) {
   return (
-    <Section title="② 匹配評分">
-      <div className="flex items-center gap-5 mb-3">
-        <ScoreRing score={m.score} />
+    <Section icon={Target} title="② 匹配評分">
+      <div className="flex items-center gap-5 mb-2">
+        <ScoreRing score={m.score} size={96} />
         <div>
-          <p className="text-sm">{m.recommend_proceed ? "✅ 建議續做" : "⚠️ 建議再評估"}</p>
+          <p className="text-sm font-medium flex items-center gap-1.5">
+            {m.recommend_proceed
+              ? <><CheckCircle2 className="w-4 h-4 text-emerald-600" />建議續做</>
+              : <><AlertTriangle className="w-4 h-4 text-amber-500" />建議再評估</>}
+          </p>
           <p className="text-sm text-slate-600 mt-1">{m.reason}</p>
         </div>
       </div>
-      {m.matched.length > 0 && (
-        <><p className="text-sm font-medium mt-2 mb-1">符合項</p>
-          <Chips items={m.matched} color="bg-emerald-100 text-emerald-700" /></>
-      )}
-      {m.gaps.length > 0 && (
-        <><p className="text-sm font-medium mt-3 mb-1">落差項</p>
-          <Chips items={m.gaps} color="bg-rose-100 text-rose-700" /></>
-      )}
+      {m.matched.length > 0 && (<><Label>符合項</Label><Tags items={m.matched} tone="emerald" /></>)}
+      {m.gaps.length > 0 && (<><Label>落差項</Label><Tags items={m.gaps} tone="rose" /></>)}
       {m.suggestions.length > 0 && (
-        <ul className="list-disc pl-5 text-sm mt-3 space-y-1">
+        <ul className="list-disc pl-5 text-sm mt-3 space-y-1 text-slate-700">
           {m.suggestions.map((s, i) => <li key={i}>{s}</li>)}
         </ul>
       )}
@@ -52,10 +68,10 @@ export function MatchCard({ m }: { m: MatchReport }) {
 
 export function CompanyCard({ c }: { c: CompanyBrief }) {
   return (
-    <Section title={`⑧ 公司情報：${c.company}`}>
+    <Section icon={Building2} title={`⑧ 公司情報：${c.company}`}>
       {(c.note || c.data_limited) && (
-        <p className="text-xs text-amber-600 mb-2">
-          （{c.note || "公開資料有限，建議自行補查"}）
+        <p className="text-xs text-amber-600 mb-2 flex items-center gap-1">
+          <AlertTriangle className="w-3.5 h-3.5" />{c.note || "公開資料有限，建議自行補查"}
         </p>
       )}
       <dl className="grid grid-cols-2 gap-2 text-sm">
@@ -64,17 +80,11 @@ export function CompanyCard({ c }: { c: CompanyBrief }) {
         {c.salary_range && <><dt className="text-slate-500">薪資範圍</dt><dd>{c.salary_range}</dd></>}
         {c.funding && <><dt className="text-slate-500">資金</dt><dd>{c.funding}</dd></>}
       </dl>
-      {c.culture_summary && <p className="text-sm mt-3">{c.culture_summary}</p>}
-      {c.benefits.length > 0 && (
-        <><p className="text-sm font-medium mt-3 mb-1">福利</p>
-          <Chips items={c.benefits} color="bg-indigo-100 text-indigo-700" /></>
-      )}
-      {c.red_flags.length > 0 && (
-        <><p className="text-sm font-medium mt-3 mb-1">避雷紅旗</p>
-          <Chips items={c.red_flags} color="bg-rose-100 text-rose-700" /></>
-      )}
+      {c.culture_summary && <p className="text-sm mt-3 text-slate-700">{c.culture_summary}</p>}
+      {c.benefits.length > 0 && (<><Label>福利</Label><Tags items={c.benefits} tone="brand" /></>)}
+      {c.red_flags.length > 0 && (<><Label>避雷紅旗</Label><Tags items={c.red_flags} tone="rose" /></>)}
       {c.recent_news.length > 0 && (
-        <ul className="list-disc pl-5 text-sm mt-3 space-y-1">
+        <ul className="list-disc pl-5 text-sm mt-3 space-y-1 text-slate-700">
           {c.recent_news.map((n, i) => <li key={i}>{n}</li>)}
         </ul>
       )}
@@ -84,19 +94,13 @@ export function CompanyCard({ c }: { c: CompanyBrief }) {
 
 export function ResumeDoc({ r }: { r: TailoredResume }) {
   return (
-    <Section title="③ 客製履歷">
-      <p className="text-sm font-medium mb-2">{r.summary}</p>
-      <ul className="list-disc pl-5 text-sm space-y-1">
+    <Section icon={FileText} title="③ 客製履歷">
+      <p className="text-sm font-medium mb-2 text-slate-800">{r.summary}</p>
+      <ul className="list-disc pl-5 text-sm space-y-1 text-slate-700">
         {r.bullets.map((b, i) => <li key={i}>{b}</li>)}
       </ul>
-      {r.ats_keywords_hit.length > 0 && (
-        <><p className="text-sm font-medium mt-3 mb-1">ATS 命中</p>
-          <Chips items={r.ats_keywords_hit} color="bg-emerald-100 text-emerald-700" /></>
-      )}
-      {r.ats_keywords_missing.length > 0 && (
-        <><p className="text-sm font-medium mt-3 mb-1">ATS 尚缺</p>
-          <Chips items={r.ats_keywords_missing} color="bg-amber-100 text-amber-700" /></>
-      )}
+      {r.ats_keywords_hit.length > 0 && (<><Label>ATS 命中</Label><Tags items={r.ats_keywords_hit} tone="emerald" /></>)}
+      {r.ats_keywords_missing.length > 0 && (<><Label>ATS 尚缺</Label><Tags items={r.ats_keywords_missing} tone="amber" /></>)}
       {r.notes && <p className="text-xs text-slate-500 mt-3">{r.notes}</p>}
     </Section>
   )
@@ -104,9 +108,9 @@ export function ResumeDoc({ r }: { r: TailoredResume }) {
 
 export function CoverLetterDoc({ c }: { c: CoverLetter }) {
   return (
-    <Section title="④ 求職信">
-      {c.subject && <p className="text-sm font-medium mb-2">主旨：{c.subject}</p>}
-      <div className="text-sm whitespace-pre-wrap leading-relaxed">{c.body}</div>
+    <Section icon={Mail} title="④ 求職信">
+      {c.subject && <p className="text-sm font-medium mb-2 text-slate-800">主旨：{c.subject}</p>}
+      <div className="text-sm whitespace-pre-wrap leading-relaxed text-slate-700">{c.body}</div>
     </Section>
   )
 }
@@ -115,8 +119,8 @@ function QList({ title, items }: { title: string; items: string[] }) {
   if (!items?.length) return null
   return (
     <div className="mt-3">
-      <p className="text-sm font-medium mb-1">{title}</p>
-      <ul className="list-disc pl-5 text-sm space-y-1">
+      <Label>{title}</Label>
+      <ul className="list-disc pl-5 text-sm space-y-1 text-slate-700">
         {items.map((q, i) => <li key={i}>{q}</li>)}
       </ul>
     </div>
@@ -125,7 +129,7 @@ function QList({ title, items }: { title: string; items: string[] }) {
 
 export function InterviewKitDoc({ k }: { k: InterviewKit }) {
   return (
-    <Section title="⑤ 面試準備">
+    <Section icon={MessageSquare} title="⑤ 面試準備">
       <QList title="技術題" items={k.technical_questions} />
       <QList title="行為題" items={k.behavioral_questions} />
       <QList title="台灣特有題" items={k.taiwan_specific_questions} />
@@ -140,19 +144,24 @@ export function CritiqueCard({ q }: { q: CritiqueReport }) {
   const rows: [string, number][] = [
     ["履歷", q.resume_score], ["求職信", q.cover_letter_score], ["面試", q.interview_score],
   ]
+  const tone = (s: number) => (s >= 80 ? "text-emerald-600" : s >= 60 ? "text-amber-500" : "text-rose-600")
   return (
-    <Section title="⑥ 品管評審">
-      <p className="text-sm mb-2">{q.overall_pass ? "✅ 整體達標" : "⚠️ 未達標（已觸發重寫）"}</p>
+    <Section icon={ShieldCheck} title="⑥ 品管評審">
+      <p className="text-sm mb-3 flex items-center gap-1.5">
+        {q.overall_pass
+          ? <><CheckCircle2 className="w-4 h-4 text-emerald-600" />整體達標</>
+          : <><AlertTriangle className="w-4 h-4 text-amber-500" />未達標（已觸發重寫）</>}
+      </p>
       <div className="grid grid-cols-3 gap-3">
         {rows.map(([label, score]) => (
-          <div key={label} className="text-center">
-            <div className="text-2xl font-bold">{score}</div>
-            <div className="text-xs text-slate-500">{label}</div>
+          <div key={label} className="text-center rounded-lg bg-slate-50 py-3">
+            <div className={`text-2xl font-bold ${tone(score)}`}>{score}</div>
+            <div className="text-xs text-slate-500 mt-0.5">{label}</div>
           </div>
         ))}
       </div>
       {q.feedback.length > 0 && (
-        <ul className="list-disc pl-5 text-sm mt-3 space-y-1">
+        <ul className="list-disc pl-5 text-sm mt-3 space-y-1 text-slate-700">
           {q.feedback.map((f, i) => <li key={i}>{f}</li>)}
         </ul>
       )}
