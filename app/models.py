@@ -149,6 +149,11 @@ class JobMatch(BaseModel):
     reason: str = Field(default="", description="為什麼適合/不適合")
 
 
+class JobPostingList(BaseModel):
+    """job 列表的結構化輸出包裝（供 WebSearch 找公司官網職缺）。"""
+    items: list[JobPosting] = Field(default_factory=list)
+
+
 class SearchResult(BaseModel):
     """單一來源的搜尋結果（被擋或錯誤時 blocked=True）。"""
     source: str

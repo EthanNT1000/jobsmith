@@ -223,6 +223,31 @@ def jobs_auto(
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
+class CompanyJobsBody(BaseModel):
+    company: str
+
+
+@app.post("/api/company/jobs")
+def company_jobs_endpoint(body: CompanyJobsBody):
+    """查某公司有無開缺：job boards 依公司過濾 + WebSearch 官網 careers。"""
+    def gen():
+        yield _sse({"type": "start"})
+        if not body.company.strip():
+            yield _sse({"type": "error", "message": "請輸入公司名稱"})
+            return
+        try:
+            from app.agents.company_jobs import find_company_jobs
+            yield _sse({"type": "progress", "message": f"查詢「{body.company}」的職缺中…"})
+            jobs = find_company_jobs(body.company)
+            yield _sse({"type": "jobs", "data": [j.model_dump() for j in jobs]})
+            yield _sse({"type": "done"})
+        except Exception as exc:  # noqa: BLE001
+            yield _sse({"type": "error",
+                        "message": f"查詢失敗，請稍後再試。（{type(exc).__name__}）"})
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
 def _load_fallback_jobs() -> list:
     """來源全失敗時的後備樣本職缺（讓 demo/離線時仍有可排序內容）。"""
     from app.models import JobPosting
