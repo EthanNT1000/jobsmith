@@ -88,7 +88,12 @@ class CritiqueReport(BaseModel):
     cover_letter_score: int = Field(ge=0, le=100)
     interview_score: int = Field(ge=0, le=100)
     overall_pass: bool = Field(description="三份成品是否整體達標")
-    feedback: list[str] = Field(default_factory=list, description="若未通過，給下一輪的具體修改指示")
+    per_doc: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="逐文件具體修改指示，鍵只能是 resume / cover_letter / interview；"
+                    "只放『未達標、需重寫』的文件，已達標的文件不要放（用於精準重寫，不重跑已過的文件）。")
+    feedback: list[str] = Field(default_factory=list,
+                                description="（程式由 per_doc 自動彙整，模型可不填）")
 
 
 class ResumeIssue(BaseModel):

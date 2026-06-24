@@ -30,7 +30,9 @@ from app.models import (
 )
 
 PROCEED_SCORE_THRESHOLD = 60
-MAX_REVISIONS = 2  # 最多評審次數（至多 1 次重寫），防無限迴圈
+MAX_REVISIONS = 3  # 最多評審次數（至多 2 次重寫），防無限迴圈
+_DOC_PASS = 75     # 安全網：per_doc 未指明時，分數低於此者視為需重寫
+_ALL_DOCS = {"resume", "cover_letter", "interview"}
 
 
 def _safe(state: CopilotState, node: str, key: str, fn, fallback):
@@ -75,33 +77,60 @@ def company_research_node(state: CopilotState) -> dict:
     )
 
 
-def _feedback(state: CopilotState):
+def _feedback(state: CopilotState, doc: str):
+    """該文件這一輪的專屬品管回饋（無則 None）。"""
     critique = state.get("critique")
-    return critique.feedback if critique else None
+    if not critique:
+        return None
+    return critique.per_doc.get(doc) or None
+
+
+def _targets(state: CopilotState) -> set[str]:
+    """這一輪要(重)寫哪些文件：首輪（無 critique）全部；重寫輪只挑未過的。"""
+    critique = state.get("critique")
+    if critique is None:
+        return set(_ALL_DOCS)
+    docs = {d for d in (critique.per_doc or {}) if d in _ALL_DOCS}
+    if not docs and not critique.overall_pass:  # 安全網：模型沒指明就用分數挑
+        if critique.resume_score < _DOC_PASS:
+            docs.add("resume")
+        if critique.cover_letter_score < _DOC_PASS:
+            docs.add("cover_letter")
+        if critique.interview_score < _DOC_PASS:
+            docs.add("interview")
+    return docs
 
 
 def resume_tailor_node(state: CopilotState) -> dict:
+    if "resume" not in _targets(state):
+        return {}  # 重寫輪此文件已達標 → 保留現有、不重跑
     return _safe(
         state, "resume_tailor", "tailored_resume",
-        lambda: tailor_resume(state["parsed_job"], state["profile"], _feedback(state)),
+        lambda: tailor_resume(state["parsed_job"], state["profile"], _feedback(state, "resume")),
         TailoredResume(summary="（履歷生成失敗，請重試）", notes="生成失敗"),
     )
 
 
 def cover_letter_node(state: CopilotState) -> dict:
+    if "cover_letter" not in _targets(state):
+        return {}
     return _safe(
         state, "cover_letter", "cover_letter",
         lambda: write_cover_letter(
-            state["parsed_job"], state["profile"], state.get("company_brief"), _feedback(state)),
+            state["parsed_job"], state["profile"], state.get("company_brief"),
+            _feedback(state, "cover_letter")),
         CoverLetter(body="（求職信生成失敗，請重試）"),
     )
 
 
 def interview_prep_node(state: CopilotState) -> dict:
+    if "interview" not in _targets(state):
+        return {}
     return _safe(
         state, "interview_prep", "interview_kit",
         lambda: prepare_interview(
-            state["parsed_job"], state["profile"], state.get("company_brief"), _feedback(state)),
+            state["parsed_job"], state["profile"], state.get("company_brief"),
+            _feedback(state, "interview")),
         InterviewKit(cautions=["面試準備生成失敗，請重試"]),
     )
 

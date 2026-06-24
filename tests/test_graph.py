@@ -76,19 +76,19 @@ def test_failing_critic_loops_then_stops_at_max(monkeypatch, demo_profile):
     def always_fail(job, r, c, k):
         calls["critic"] += 1
         return CritiqueReport(resume_score=10, cover_letter_score=10, interview_score=10,
-                              overall_pass=False, feedback=["再加強"])
+                              overall_pass=False)  # 無 per_doc → 安全網用分數挑全部
 
     monkeypatch.setattr(graph_mod, "tailor_resume", counting_resume)
     monkeypatch.setattr(graph_mod, "critique_package", always_fail)
     g = graph_mod.build_graph()
 
     result = g.invoke(_initial(demo_profile), CONFIG)
-    assert calls["critic"] == 2
-    assert calls["resume"] == 2
+    assert calls["critic"] == 3   # MAX_REVISIONS=3：評審 3 次（含 2 次重寫）
+    assert calls["resume"] == 3
     assert "__interrupt__" in result
 
 
-def test_revise_passes_feedback_to_generators(monkeypatch, demo_profile):
+def test_revise_passes_per_doc_feedback_to_generator(monkeypatch, demo_profile):
     _patch_base(monkeypatch, MatchReport(score=82, recommend_proceed=True, reason="吻合"))
     seen = {"feedback": None}
 
@@ -102,10 +102,10 @@ def test_revise_passes_feedback_to_generators(monkeypatch, demo_profile):
     def fail_once(job, r, c, k):
         critic_calls["n"] += 1
         if critic_calls["n"] == 1:
-            return CritiqueReport(resume_score=10, cover_letter_score=10, interview_score=10,
-                                  overall_pass=False, feedback=["把成果量化"])
+            return CritiqueReport(resume_score=10, cover_letter_score=90, interview_score=90,
+                                  overall_pass=False, per_doc={"resume": ["把成果量化"]})
         return CritiqueReport(resume_score=90, cover_letter_score=90, interview_score=90,
-                              overall_pass=True, feedback=[])
+                              overall_pass=True)
 
     monkeypatch.setattr(graph_mod, "tailor_resume", resume_capture)
     monkeypatch.setattr(graph_mod, "critique_package", fail_once)
@@ -113,6 +113,45 @@ def test_revise_passes_feedback_to_generators(monkeypatch, demo_profile):
 
     g.invoke(_initial(demo_profile), CONFIG)
     assert seen["feedback"] == ["把成果量化"]
+
+
+def test_targeted_revise_only_reruns_failed_doc(monkeypatch, demo_profile):
+    # per_doc 只標 resume → 重寫輪只重跑 resume，cover/interview 不動（省 token）
+    _patch_base(monkeypatch, MatchReport(score=82, recommend_proceed=True, reason="吻合"))
+    calls = {"resume": 0, "cover": 0, "interview": 0}
+
+    def cnt_resume(job, profile, feedback=None):
+        calls["resume"] += 1
+        return TailoredResume(summary="r")
+
+    def cnt_cover(job, profile, company, feedback=None):
+        calls["cover"] += 1
+        return CoverLetter(body="c")
+
+    def cnt_interview(job, profile, company, feedback=None):
+        calls["interview"] += 1
+        return InterviewKit()
+
+    critic_calls = {"n": 0}
+
+    def fail_resume_once(job, r, c, k):
+        critic_calls["n"] += 1
+        if critic_calls["n"] == 1:
+            return CritiqueReport(resume_score=10, cover_letter_score=90, interview_score=90,
+                                  overall_pass=False, per_doc={"resume": ["再加強"]})
+        return CritiqueReport(resume_score=90, cover_letter_score=90, interview_score=90,
+                              overall_pass=True)
+
+    monkeypatch.setattr(graph_mod, "tailor_resume", cnt_resume)
+    monkeypatch.setattr(graph_mod, "write_cover_letter", cnt_cover)
+    monkeypatch.setattr(graph_mod, "prepare_interview", cnt_interview)
+    monkeypatch.setattr(graph_mod, "critique_package", fail_resume_once)
+    g = graph_mod.build_graph()
+
+    g.invoke(_initial(demo_profile), CONFIG)
+    assert calls["resume"] == 2      # 首輪 + 重寫
+    assert calls["cover"] == 1       # 只跑首輪，未被重跑
+    assert calls["interview"] == 1
 
 
 def test_route_after_match():
@@ -130,9 +169,9 @@ def test_route_after_critic():
     assert graph_mod.route_after_critic(passing) == "approve"
 
     failing_under = {"critique": CritiqueReport(resume_score=10, cover_letter_score=10,
-                     interview_score=10, overall_pass=False), "revision_count": 1}
+                     interview_score=10, overall_pass=False), "revision_count": 2}
     assert graph_mod.route_after_critic(failing_under) == "revise"
 
     failing_at_max = {"critique": CritiqueReport(resume_score=10, cover_letter_score=10,
-                      interview_score=10, overall_pass=False), "revision_count": 2}
+                      interview_score=10, overall_pass=False), "revision_count": 3}
     assert graph_mod.route_after_critic(failing_at_max) == "approve"
