@@ -3,13 +3,30 @@ import type { ChangeEvent } from "react"
 import type { JobMatch, UserProfile } from "../types"
 import { readSSE } from "../sse"
 import { SAMPLE_RESUME } from "../sampleResume"
+import { Card } from "../ui/Card"
+import { Button } from "../ui/Button"
+import { Badge } from "../ui/Badge"
+import { Skeleton } from "../ui/Skeleton"
+import { EmptyState } from "../ui/EmptyState"
+import { Search, Upload, Loader2, ExternalLink, Sparkles, AlertTriangle } from "../ui/icons"
 
 const SRC_LABEL: Record<string, string> = {
   "104": "104", yourator: "Yourator", cake: "Cake", sample: "範例",
 }
 
-function fitColor(s: number) {
-  return s >= 80 ? "bg-emerald-600" : s >= 60 ? "bg-amber-500" : "bg-slate-400"
+function fitGradient(s: number) {
+  return s >= 80 ? "from-emerald-500 to-emerald-600"
+    : s >= 60 ? "from-amber-500 to-amber-600"
+      : "from-slate-400 to-slate-500"
+}
+
+function FitBadge({ score }: { score: number }) {
+  return (
+    <div className={`shrink-0 w-14 h-14 rounded-xl bg-gradient-to-br ${fitGradient(score)} text-white grid place-items-center text-center`}>
+      <div className="text-lg font-bold leading-none">{score}</div>
+      <div className="text-[9px] opacity-85 mt-0.5">適配</div>
+    </div>
+  )
 }
 
 export function JobSearchView(
@@ -79,113 +96,128 @@ export function JobSearchView(
 
   return (
     <div>
-      <div className="bg-white border rounded-xl p-5 mb-5">
-        <p className="text-sm text-slate-600 mb-2">丟上你的履歷，AI 自動推導關鍵字、搜尋 104 / Yourator / Cake，並依你的履歷排序適合的職缺。</p>
+      <Card className="p-5 mb-5">
+        <p className="text-sm text-slate-600 mb-2">
+          丟上你的履歷，AI 自動推導關鍵字、搜尋 104 / Yourator / Cake，並依你的履歷排序適合的職缺。
+        </p>
         <textarea
-          className="w-full border rounded-lg p-3 text-sm h-32"
+          className="w-full border border-slate-300 rounded-lg p-3 text-sm h-32 focus:outline-none focus:ring-2 focus:ring-brand-200"
           placeholder="貼上履歷文字…"
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
         <div className="flex flex-wrap gap-2 mt-3 items-center">
-          <button onClick={onSubmitText} disabled={busy}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm disabled:opacity-50">
-            開始自動找職缺
-          </button>
-          <button onClick={() => setText(SAMPLE_RESUME)} disabled={busy}
-            className="px-4 py-2 bg-slate-200 rounded-lg text-sm">載入範例履歷</button>
-          <label className="px-4 py-2 bg-slate-200 rounded-lg text-sm cursor-pointer">
-            上傳檔案（PDF/DOCX/TXT）
+          <Button onClick={onSubmitText} loading={busy} icon={Search}>開始自動找職缺</Button>
+          <Button variant="secondary" onClick={() => setText(SAMPLE_RESUME)} disabled={busy}>載入範例履歷</Button>
+          <label className={`inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg font-medium border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition cursor-pointer ${busy ? "opacity-50 pointer-events-none" : ""}`}>
+            <Upload className="w-4 h-4" />上傳檔案（PDF/DOCX/TXT）
             <input type="file" accept=".pdf,.docx,.txt" className="hidden" onChange={onFile} disabled={busy} />
           </label>
-          {status && <span className="text-sm text-slate-500">⏳ {status}</span>}
+          {busy && status && (
+            <span className="text-sm text-slate-500 inline-flex items-center gap-1">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />{status}
+            </span>
+          )}
         </div>
         {error && <p className="text-sm text-rose-600 mt-2">{error}</p>}
         {queries.length > 0 && (
-          <div className="mt-3 text-sm text-slate-600">
-            搜尋關鍵字：{queries.map((q, i) => (
-              <span key={i} className="inline-block bg-slate-100 rounded-full px-2 py-0.5 mr-1">{q}</span>
-            ))}
+          <div className="mt-3 text-sm text-slate-600 flex flex-wrap items-center gap-1.5">
+            <span className="text-slate-500">搜尋關鍵字：</span>
+            {queries.map((q, i) => <Badge key={i} tone="slate">{q}</Badge>)}
           </div>
         )}
         {sources.length > 0 && (
-          <div className="mt-2 text-xs text-slate-500 flex flex-wrap gap-2">
+          <div className="mt-2 text-xs text-slate-500 flex flex-wrap gap-3">
             {sources.map((s, i) => (
-              <span key={i}>{SRC_LABEL[s.source] || s.source}：{s.blocked ? "✗ 略過" : `✓ ${s.count}`}</span>
+              <span key={i} className={s.blocked ? "text-slate-400" : "text-emerald-600"}>
+                {SRC_LABEL[s.source] || s.source}：{s.blocked ? "✗ 略過" : `✓ ${s.count}`}
+              </span>
             ))}
           </div>
         )}
-      </div>
+      </Card>
 
       {blockedNote && (
-        <div className="mb-3 text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3">
-          {blockedNote}
+        <div className="mb-3 text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />{blockedNote}
         </div>
       )}
 
       {jobs.length > 0 && (
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="font-semibold">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-semibold flex items-center gap-2">
             推薦職缺（依適配度排序）
-            {fallback && (
-              <span className="ml-2 text-xs font-normal bg-amber-100 text-amber-700 rounded-full px-2 py-0.5">
-                範例資料
-              </span>
-            )}
+            {fallback && <Badge tone="amber">範例資料</Badge>}
           </h2>
           {linkedin && (
             <a href={linkedin} target="_blank" rel="noreferrer"
-              className="text-sm text-indigo-600 underline">也到 LinkedIn 搜尋 ↗</a>
+              className="text-sm text-brand-600 hover:underline inline-flex items-center gap-1">
+              也到 LinkedIn 搜尋 <ExternalLink className="w-3.5 h-3.5" />
+            </a>
           )}
+        </div>
+      )}
+
+      {busy && jobs.length === 0 && (
+        <div className="space-y-3">
+          {[0, 1, 2].map((i) => (
+            <Card key={i} className="p-4 flex gap-4">
+              <Skeleton className="w-14 h-14 rounded-xl" />
+              <div className="flex-1 space-y-2 py-1">
+                <Skeleton className="h-4 w-1/2" />
+                <Skeleton className="h-3 w-1/3" />
+                <Skeleton className="h-3 w-3/4" />
+              </div>
+            </Card>
+          ))}
         </div>
       )}
 
       {done && jobs.length === 0 && !error && (
-        <div className="text-center text-slate-500 bg-white border rounded-xl p-8">
-          <p className="font-medium text-slate-700">這次沒有取得職缺結果</p>
-          <p className="text-sm mt-1">即時來源可能暫時被擋，可調整履歷關鍵字再試，或</p>
-          {linkedin && (
-            <a href={linkedin} target="_blank" rel="noreferrer"
-              className="inline-block mt-2 text-sm text-indigo-600 underline">直接到 LinkedIn 搜尋 ↗</a>
-          )}
-        </div>
+        <Card className="p-2">
+          <EmptyState
+            icon={Search}
+            title="這次沒有取得職缺結果"
+            desc="即時來源可能暫時被擋，可調整履歷關鍵字再試。"
+            action={linkedin ? (
+              <a href={linkedin} target="_blank" rel="noreferrer">
+                <Button variant="secondary" icon={ExternalLink}>直接到 LinkedIn 搜尋</Button>
+              </a>
+            ) : undefined}
+          />
+        </Card>
       )}
 
       <div className="space-y-3">
         {jobs.map((m, i) => (
-          <div key={i} className="bg-white border rounded-xl p-4 flex gap-4">
-            <div className={`shrink-0 w-12 h-12 rounded-lg text-white flex items-center justify-center font-bold ${fitColor(m.fit_score)}`}>
-              {m.fit_score}
-            </div>
+          <Card key={i} interactive className="p-4 flex gap-4 animate-fade-in-up">
+            <FitBadge score={m.fit_score} />
             <div className="flex-1 min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <a href={m.job.url} target="_blank" rel="noreferrer"
-                  className="font-medium text-slate-900 hover:underline">{m.job.title}</a>
-                <span className="text-xs bg-slate-100 text-slate-500 rounded-full px-2 py-0.5">
-                  {SRC_LABEL[m.job.source] || m.job.source}
-                </span>
+                  className="font-medium text-slate-900 hover:text-brand-700 hover:underline">{m.job.title}</a>
+                <Badge tone="slate">{SRC_LABEL[m.job.source] || m.job.source}</Badge>
               </div>
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-slate-600 mt-0.5">
                 {m.job.company}
                 {m.job.location ? `｜${m.job.location}` : ""}
                 {m.job.salary ? `｜${m.job.salary}` : ""}
               </p>
               {m.reason && <p className="text-sm text-slate-700 mt-1">{m.reason}</p>}
               {m.matched.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {m.matched.map((t, k) => (
-                    <span key={k} className="text-xs bg-emerald-100 text-emerald-700 rounded-full px-2 py-0.5">{t}</span>
-                  ))}
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {m.matched.map((t, k) => <Badge key={k} tone="emerald">{t}</Badge>)}
                 </div>
               )}
             </div>
             <div className="shrink-0 flex flex-col gap-2">
-              <button onClick={() => pick(m)}
-                className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm whitespace-nowrap">產生投遞包</button>
+              <Button size="sm" icon={Sparkles} onClick={() => pick(m)} className="whitespace-nowrap">產生投遞包</Button>
               <a href={m.job.url} target="_blank" rel="noreferrer"
-                className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-sm text-center whitespace-nowrap">看原職缺</a>
+                className="inline-flex items-center justify-center gap-1 px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-sm hover:bg-slate-200 transition whitespace-nowrap">
+                <ExternalLink className="w-3.5 h-3.5" />看原職缺
+              </a>
             </div>
-          </div>
+          </Card>
         ))}
       </div>
     </div>

@@ -5,6 +5,12 @@ import { AgentTrace } from "../components/pipeline/AgentTrace"
 import {
   MatchCard, CompanyCard, ResumeDoc, CoverLetterDoc, InterviewKitDoc, CritiqueCard,
 } from "../components/pipeline/Documents"
+import { Card } from "../ui/Card"
+import { Button } from "../ui/Button"
+import { EmptyState } from "../ui/EmptyState"
+import {
+  Sparkles, Network, ArrowLeft, AlertTriangle, CheckCircle2, RefreshCw, Printer,
+} from "../ui/icons"
 
 type Phase = "idle" | "running" | "approval" | "done"
 
@@ -97,31 +103,32 @@ export function PipelineView(
   return (
     <div>
       {onBack && (
-        <button onClick={onBack} className="no-print text-sm text-indigo-600 mb-3">← 回職缺列表</button>
+        <button onClick={onBack}
+          className="no-print text-sm text-brand-600 hover:text-brand-700 mb-3 inline-flex items-center gap-1">
+          <ArrowLeft className="w-4 h-4" />回職缺列表
+        </button>
       )}
-      <div className="no-print mb-4 bg-white border rounded-xl p-5">
+      <Card className="no-print mb-4 p-5">
         <textarea
-          className="w-full border rounded-lg p-3 text-sm h-32"
+          className="w-full border border-slate-300 rounded-lg p-3 text-sm h-32 focus:outline-none focus:ring-2 focus:ring-brand-200"
           placeholder="貼上職缺 JD 文字…"
           value={jd}
           onChange={(e) => setJd(e.target.value)}
         />
         <div className="flex flex-wrap gap-2 mt-3 items-center">
-          <button onClick={() => run()} disabled={phase === "running" || !jd.trim()}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm disabled:opacity-50">
+          <Button onClick={() => run()} disabled={phase === "running" || !jd.trim()}
+            loading={phase === "running"} icon={Sparkles}>
             開始（跑 8 個 agent）
-          </button>
-          <button onClick={loadSample} disabled={phase === "running"}
-            className="px-4 py-2 bg-slate-200 rounded-lg text-sm">載入範例 JD</button>
+          </Button>
+          <Button variant="secondary" onClick={loadSample} disabled={phase === "running"}>載入範例 JD</Button>
           {hasDocs && (
-            <button onClick={() => window.print()}
-              className="px-4 py-2 bg-slate-200 rounded-lg text-sm">列印 / 匯出 PDF</button>
+            <Button variant="secondary" icon={Printer} onClick={() => window.print()}>列印 / 匯出 PDF</Button>
           )}
         </div>
         {error && <p className="text-sm text-rose-600 mt-2">{error}</p>}
-      </div>
+      </Card>
 
-      <div className="grid lg:grid-cols-[260px_1fr] gap-6 print:block">
+      <div className="grid lg:grid-cols-[300px_1fr] gap-6 print:block">
         <aside className="no-print">
           <AgentTrace
             done={done}
@@ -134,25 +141,35 @@ export function PipelineView(
         </aside>
         <main className="space-y-4">
           {profileWarning && (
-            <div className="border-2 border-amber-300 bg-amber-50 rounded-xl p-3 text-sm text-amber-800">
-              ⚠️ {profileWarning}
+            <div className="border border-amber-300 bg-amber-50 rounded-xl p-3 text-sm text-amber-800 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />{profileWarning}
             </div>
           )}
           {phase === "approval" && (
-            <div className="no-print border-2 border-indigo-300 bg-indigo-50 rounded-xl p-4 flex flex-wrap items-center gap-3">
-              <span className="text-sm font-medium">這份投遞包要核可嗎？</span>
-              <button onClick={() => decide("y")}
-                className="px-3 py-1 bg-emerald-600 text-white rounded text-sm">核可</button>
-              <button onClick={() => decide("n")}
-                className="px-3 py-1 bg-rose-600 text-white rounded text-sm">退回重做</button>
+            <Card className="no-print border-brand-200 bg-brand-50/60 p-4 flex flex-wrap items-center gap-3">
+              <span className="text-sm font-medium flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-brand-600" />這份投遞包要核可嗎？
+              </span>
+              <Button size="sm" variant="primary" icon={CheckCircle2} onClick={() => decide("y")}>核可</Button>
+              <Button size="sm" variant="danger" icon={RefreshCw} onClick={() => decide("n")}>退回重做</Button>
+            </Card>
+          )}
+          {state.approved === true && (
+            <div className="no-print text-sm text-emerald-700 flex items-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4" />已核可
             </div>
           )}
-          {state.approved === true && <div className="no-print text-sm text-emerald-700">✅ 已核可</div>}
-          {state.approved === false && <div className="no-print text-sm text-rose-700">↩︎ 已退回</div>}
+          {state.approved === false && (
+            <div className="no-print text-sm text-rose-700 flex items-center gap-1.5">
+              <RefreshCw className="w-4 h-4" />已退回
+            </div>
+          )}
 
           {nodeErrors.length > 0 && (
             <div className="no-print bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
-              <p className="font-medium mb-1">部分環節降級（已用替代內容續跑，可重試提升品質）</p>
+              <p className="font-medium mb-1 flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4" />部分環節降級（已用替代內容續跑，可重試提升品質）
+              </p>
               <ul className="list-disc pl-5 space-y-0.5">
                 {nodeErrors.map((e, i) => <li key={i}>{e.node}：{e.message}</li>)}
               </ul>
@@ -167,7 +184,13 @@ export function PipelineView(
           {state.critique && <CritiqueCard q={state.critique} />}
 
           {!hasDocs && phase !== "running" && (
-            <p className="text-slate-400 text-sm">貼上 JD 後按「開始」，這裡會即時長出投遞包成品（履歷／求職信／面試／公司情報）。</p>
+            <Card className="p-2">
+              <EmptyState
+                icon={Network}
+                title="貼上 JD 後按「開始」"
+                desc="這裡會即時長出投遞包成品（客製履歷／求職信／面試準備／公司情報），左側可看 8 個 agent 的即時編排。"
+              />
+            </Card>
           )}
         </main>
       </div>

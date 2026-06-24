@@ -4,6 +4,11 @@ import type { ResumeAssessment, UserProfile } from "../types"
 import { readSSE } from "../sse"
 import { SAMPLE_RESUME } from "../sampleResume"
 import { Dashboard } from "../components/Dashboard"
+import { Card } from "../ui/Card"
+import { Button } from "../ui/Button"
+import { Skeleton } from "../ui/Skeleton"
+import { EmptyState } from "../ui/EmptyState"
+import { Gauge, Upload, Loader2 } from "../ui/icons"
 
 export function ResumeHealthView({ onProfile }: { onProfile?: (p: UserProfile) => void }) {
   const [text, setText] = useState("")
@@ -48,28 +53,51 @@ export function ResumeHealthView({ onProfile }: { onProfile?: (p: UserProfile) =
 
   return (
     <div>
-      <div className="bg-white border rounded-xl p-5 mb-6">
+      <Card className="p-5 mb-6">
         <textarea
-          className="w-full border rounded-lg p-3 text-sm h-40"
+          className="w-full border border-slate-300 rounded-lg p-3 text-sm h-40 focus:outline-none focus:ring-2 focus:ring-brand-200"
           placeholder="貼上履歷文字…"
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
         <div className="flex flex-wrap gap-2 mt-3 items-center">
-          <button onClick={onSubmitText} disabled={busy}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm disabled:opacity-50">
-            開始健檢
-          </button>
-          <button onClick={() => setText(SAMPLE_RESUME)} disabled={busy}
-            className="px-4 py-2 bg-slate-200 rounded-lg text-sm">載入範例履歷</button>
-          <label className="px-4 py-2 bg-slate-200 rounded-lg text-sm cursor-pointer">
-            上傳檔案（PDF/DOCX/TXT）
+          <Button onClick={onSubmitText} loading={busy} icon={Gauge}>開始健檢</Button>
+          <Button variant="secondary" onClick={() => setText(SAMPLE_RESUME)} disabled={busy}>載入範例履歷</Button>
+          <label className={`inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg font-medium border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition cursor-pointer ${busy ? "opacity-50 pointer-events-none" : ""}`}>
+            <Upload className="w-4 h-4" />上傳檔案（PDF/DOCX/TXT）
             <input type="file" accept=".pdf,.docx,.txt" className="hidden" onChange={onFile} disabled={busy} />
           </label>
-          {status && <span className="text-sm text-slate-500">{status}</span>}
+          {busy && status && (
+            <span className="text-sm text-slate-500 inline-flex items-center gap-1">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />{status}
+            </span>
+          )}
         </div>
         {error && <p className="text-sm text-rose-600 mt-2">{error}</p>}
-      </div>
+      </Card>
+
+      {busy && !assessment && (
+        <div className="space-y-6">
+          <Card className="p-6 flex items-center gap-6">
+            <Skeleton className="w-28 h-28 rounded-full" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-2/3" />
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {!busy && !assessment && !error && (
+        <Card className="p-2">
+          <EmptyState
+            icon={Gauge}
+            title="貼上或上傳你的履歷，開始健檢"
+            desc="AI 會評分表達清晰度、量化成果、ATS 關鍵字與台灣慣例，並給出可改進項目與改寫範例。"
+          />
+        </Card>
+      )}
 
       {assessment && <Dashboard a={assessment} />}
     </div>
