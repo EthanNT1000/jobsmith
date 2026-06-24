@@ -23,13 +23,13 @@ from app.agents.resume import tailor_resume
 from app.agents.cover_letter import write_cover_letter
 from app.agents.interview import prepare_interview
 from app.agents.critic import critique_package
+from app.agents.supervisor import supervise_after_match, supervise_after_critic
 
 from app.models import (
     ParsedJob, MatchReport, CompanyBrief, TailoredResume, CoverLetter, InterviewKit,
-    CritiqueReport,
+    CritiqueReport, SupervisorDecision,
 )
 
-PROCEED_SCORE_THRESHOLD = 60
 MAX_REVISIONS = 3  # 最多評審次數（至多 2 次重寫），防無限迴圈
 _DOC_PASS = 75     # 安全網：per_doc 未指明時，分數低於此者視為需重寫
 _ALL_DOCS = {"resume", "cover_letter", "interview"}
@@ -86,10 +86,13 @@ def _feedback(state: CopilotState, doc: str):
 
 
 def _targets(state: CopilotState) -> set[str]:
-    """這一輪要(重)寫哪些文件：首輪（無 critique）全部；重寫輪只挑未過的。"""
+    """這一輪要(重)寫哪些文件：首輪（無 critique）全部；重寫輪依 supervisor / per_doc / 分數。"""
     critique = state.get("critique")
     if critique is None:
         return set(_ALL_DOCS)
+    decision = state.get("supervisor_decision")  # supervisor 指定優先
+    if decision and decision.docs_to_revise:
+        return {d for d in decision.docs_to_revise if d in _ALL_DOCS}
     docs = {d for d in (critique.per_doc or {}) if d in _ALL_DOCS}
     if not docs and not critique.overall_pass:  # 安全網：模型沒指明就用分數挑
         if critique.resume_score < _DOC_PASS:
@@ -99,6 +102,26 @@ def _targets(state: CopilotState) -> set[str]:
         if critique.interview_score < _DOC_PASS:
             docs.add("interview")
     return docs
+
+
+def supervisor_match_node(state: CopilotState) -> dict:
+    """① Supervisor：看匹配報告動態決定 proceed / stop（telemetry 經 _safe 記錄）。"""
+    return _safe(
+        state, "supervisor_match", "supervisor_decision",
+        lambda: supervise_after_match(
+            state["match_report"], state["parsed_job"], state["profile"]),
+        SupervisorDecision(next_action="stop", rationale="supervisor 失敗，保守停止"),
+    )
+
+
+def supervisor_critic_node(state: CopilotState) -> dict:
+    """① Supervisor：看品管評審動態決定 approve / revise + docs_to_revise。"""
+    return _safe(
+        state, "supervisor_critic", "supervisor_decision",
+        lambda: supervise_after_critic(
+            state["critique"], state.get("revision_count", 0), MAX_REVISIONS),
+        SupervisorDecision(next_action="approve", rationale="supervisor 失敗，直接送核可"),
+    )
 
 
 def resume_tailor_node(state: CopilotState) -> dict:
@@ -163,20 +186,19 @@ def human_gate_node(state: CopilotState) -> dict:
     return {"approved": approved}
 
 
-def route_after_match(state: CopilotState) -> str:
-    report = state["match_report"]
-    # 若 match agent 失敗（已降級），不要把崩潰誤判為「低適配 → 停止」：照樣產出降級投遞包。
+def route_match_decision(state: CopilotState) -> str:
+    """依 supervisor 決策路由；match agent 崩潰則強制續做（避免誤判為低適配而停止）。"""
     match_errored = any(e.get("node") == "match" for e in (state.get("errors") or []))
-    if match_errored or (report.recommend_proceed and report.score >= PROCEED_SCORE_THRESHOLD):
+    if match_errored:
         return "company_research"
-    return "stop"
+    decision = state.get("supervisor_decision")
+    return "company_research" if decision and decision.next_action == "proceed" else "stop"
 
 
-def route_after_critic(state: CopilotState) -> str:
-    critique = state["critique"]
-    if critique.overall_pass or state.get("revision_count", 0) >= MAX_REVISIONS:
-        return "approve"
-    return "revise"
+def route_critic_decision(state: CopilotState) -> str:
+    """依 supervisor 決策路由 revise / approve（上限保底已在 supervise_after_critic 處理）。"""
+    decision = state.get("supervisor_decision")
+    return "revise" if decision and decision.next_action == "revise" else "approve"
 
 
 def _default_db_path() -> str:
@@ -201,18 +223,21 @@ def build_graph(checkpointer=None):
     g = StateGraph(CopilotState)
     g.add_node("parse", parse_node)
     g.add_node("match", match_node)
+    g.add_node("supervisor_match", supervisor_match_node)
     g.add_node("company_research", company_research_node)
     g.add_node("resume_tailor", resume_tailor_node)
     g.add_node("cover_letter", cover_letter_node)
     g.add_node("interview_prep", interview_prep_node)
     g.add_node("join", join_node)
     g.add_node("critic", critic_node)
+    g.add_node("supervisor_critic", supervisor_critic_node)
     g.add_node("human_gate", human_gate_node)
 
     g.add_edge(START, "parse")
     g.add_edge("parse", "match")
+    g.add_edge("match", "supervisor_match")
     g.add_conditional_edges(
-        "match", route_after_match,
+        "supervisor_match", route_match_decision,
         {"company_research": "company_research", "stop": END},
     )
     g.add_edge("company_research", "resume_tailor")
@@ -222,8 +247,9 @@ def build_graph(checkpointer=None):
     g.add_edge("cover_letter", "join")
     g.add_edge("interview_prep", "join")
     g.add_edge("join", "critic")
+    g.add_edge("critic", "supervisor_critic")
     g.add_conditional_edges(
-        "critic", route_after_critic,
+        "supervisor_critic", route_critic_decision,
         {"revise": "company_research", "approve": "human_gate"},
     )
     g.add_edge("human_gate", END)

@@ -5,6 +5,7 @@ from typing import Annotated, TypedDict
 from app.models import (
     Profile, ParsedJob, MatchReport,
     CompanyBrief, TailoredResume, CoverLetter, InterviewKit, CritiqueReport,
+    SupervisorDecision,
 )
 
 
@@ -13,6 +14,7 @@ class CopilotState(TypedDict):
     profile: Profile
     parsed_job: ParsedJob | None
     match_report: MatchReport | None
+    supervisor_decision: SupervisorDecision | None
     company_brief: CompanyBrief | None
     tailored_resume: TailoredResume | None
     cover_letter: CoverLetter | None

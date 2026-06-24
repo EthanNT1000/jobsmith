@@ -97,6 +97,7 @@ def run(jd_path: str, profile_path: str = "data/demo_profile.json") -> CopilotSt
         "profile": profile,
         "parsed_job": None,
         "match_report": None,
+        "supervisor_decision": None,
         "company_brief": None,
         "tailored_resume": None,
         "cover_letter": None,

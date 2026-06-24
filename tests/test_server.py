@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.models import (
     ParsedJob, MatchReport, CompanyBrief, TailoredResume, CoverLetter,
-    InterviewKit, CritiqueReport,
+    InterviewKit, CritiqueReport, SupervisorDecision,
 )
 from app import graph as graph_mod
 from app import server as server_mod
@@ -15,6 +15,14 @@ def _patch_agents(monkeypatch):
                         lambda jd_text: ParsedJob(title="AI 工程師", company="未來智能"))
     monkeypatch.setattr(graph_mod, "match_profile",
                         lambda job, profile: MatchReport(score=82, recommend_proceed=True, reason="吻合"))
+    monkeypatch.setattr(graph_mod, "supervise_after_match",
+                        lambda match, job, profile: SupervisorDecision(
+                            next_action="proceed" if (match.recommend_proceed and match.score >= 60)
+                            else "stop"))
+    monkeypatch.setattr(graph_mod, "supervise_after_critic",
+                        lambda critique, rc, mx: SupervisorDecision(
+                            next_action="approve" if (critique.overall_pass or rc >= mx) else "revise",
+                            docs_to_revise=[d for d in (critique.per_doc or {})]))
     monkeypatch.setattr(graph_mod, "research_company",
                         lambda name: CompanyBrief(company=name))
     monkeypatch.setattr(graph_mod, "tailor_resume",

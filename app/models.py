@@ -1,4 +1,6 @@
 """共享領域模型（強型別、可被 with_structured_output 使用）。"""
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -153,3 +155,13 @@ class SearchResult(BaseModel):
     jobs: list[JobPosting] = Field(default_factory=list)
     blocked: bool = Field(default=False)
     error: str | None = None
+
+
+class SupervisorDecision(BaseModel):
+    """① Supervisor 的調度決策（LLM 動態判斷，取代寫死門檻；失敗時回門檻備援）。"""
+    next_action: Literal["proceed", "stop", "revise", "approve"] = Field(
+        description="proceed=續做投遞包 / stop=不續做 / revise=重寫 / approve=送人工核可")
+    docs_to_revise: list[str] = Field(
+        default_factory=list,
+        description="next_action=revise 時要重寫哪些文件，鍵限 resume/cover_letter/interview")
+    rationale: str = Field(default="", description="決策理由（給使用者看的一句話）")

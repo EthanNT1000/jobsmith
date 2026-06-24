@@ -243,10 +243,10 @@ def run(body: RunBody):
                                    "請先到「自動找職缺」或「履歷健檢」提供你的履歷，再產生個人化投遞包。"})
         initial = {
             "jd_text": body.jd_text, "profile": profile,
-            "parsed_job": None, "match_report": None, "company_brief": None,
-            "tailored_resume": None, "cover_letter": None, "interview_kit": None,
-            "critique": None, "revision_count": 0, "approved": None,
-            "errors": [], "telemetry": [],
+            "parsed_job": None, "match_report": None, "supervisor_decision": None,
+            "company_brief": None, "tailored_resume": None, "cover_letter": None,
+            "interview_kit": None, "critique": None, "revision_count": 0,
+            "approved": None, "errors": [], "telemetry": [],
         }
         yield from _stream(initial, config)
 

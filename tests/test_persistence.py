@@ -7,7 +7,7 @@ from langgraph.types import Command
 from app import graph as graph_mod
 from app.models import (
     ParsedJob, MatchReport, CompanyBrief, TailoredResume, CoverLetter,
-    InterviewKit, CritiqueReport,
+    InterviewKit, CritiqueReport, SupervisorDecision,
 )
 
 
@@ -16,6 +16,11 @@ def _patch_agents(monkeypatch):
                         lambda jd: ParsedJob(title="AI 工程師", company="未來智能"))
     monkeypatch.setattr(graph_mod, "match_profile",
                         lambda job, profile: MatchReport(score=82, recommend_proceed=True, reason="吻合"))
+    monkeypatch.setattr(graph_mod, "supervise_after_match",
+                        lambda match, job, profile: SupervisorDecision(next_action="proceed"))
+    monkeypatch.setattr(graph_mod, "supervise_after_critic",
+                        lambda critique, rc, mx: SupervisorDecision(
+                            next_action="approve" if (critique.overall_pass or rc >= mx) else "revise"))
     monkeypatch.setattr(graph_mod, "research_company", lambda name: CompanyBrief(company=name))
     monkeypatch.setattr(graph_mod, "tailor_resume",
                         lambda job, profile, feedback=None: TailoredResume(summary="履歷"))

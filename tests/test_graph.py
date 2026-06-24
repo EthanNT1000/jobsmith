@@ -2,11 +2,23 @@ from langgraph.types import Command
 
 from app.models import (
     ParsedJob, MatchReport, CompanyBrief, TailoredResume, CoverLetter,
-    InterviewKit, CritiqueReport,
+    InterviewKit, CritiqueReport, SupervisorDecision,
 )
 from app import graph as graph_mod
 
 CONFIG = {"configurable": {"thread_id": "test-thread"}}
+
+
+def _patch_supervisor(monkeypatch):
+    # supervisor 用確定性門檻邏輯（不打 LLM），保留原路由語意供其他測試斷言
+    monkeypatch.setattr(graph_mod, "supervise_after_match",
+                        lambda match, job, profile: SupervisorDecision(
+                            next_action="proceed" if (match.recommend_proceed and match.score >= 60)
+                            else "stop"))
+    monkeypatch.setattr(graph_mod, "supervise_after_critic",
+                        lambda critique, rc, mx: SupervisorDecision(
+                            next_action="approve" if (critique.overall_pass or rc >= mx) else "revise",
+                            docs_to_revise=[d for d in (critique.per_doc or {})]))
 
 
 def _patch_base(monkeypatch, report: MatchReport):
@@ -21,6 +33,7 @@ def _patch_base(monkeypatch, report: MatchReport):
                         lambda job, profile, company, feedback=None: CoverLetter(body="信"))
     monkeypatch.setattr(graph_mod, "prepare_interview",
                         lambda job, profile, company, feedback=None: InterviewKit(technical_questions=["Q"]))
+    _patch_supervisor(monkeypatch)
 
 
 def _passing_critic(monkeypatch):
@@ -154,24 +167,24 @@ def test_targeted_revise_only_reruns_failed_doc(monkeypatch, demo_profile):
     assert calls["interview"] == 1
 
 
-def test_route_after_match():
-    assert graph_mod.route_after_match(
-        {"match_report": MatchReport(score=80, recommend_proceed=True, reason="高")}
+def test_route_match_decision():
+    # 依 supervisor 決策路由；match 崩潰則強制續做
+    assert graph_mod.route_match_decision(
+        {"supervisor_decision": SupervisorDecision(next_action="proceed"), "errors": []}
     ) == "company_research"
-    assert graph_mod.route_after_match(
-        {"match_report": MatchReport(score=50, recommend_proceed=True, reason="低")}
+    assert graph_mod.route_match_decision(
+        {"supervisor_decision": SupervisorDecision(next_action="stop"), "errors": []}
     ) == "stop"
+    assert graph_mod.route_match_decision(
+        {"supervisor_decision": SupervisorDecision(next_action="stop"),
+         "errors": [{"node": "match", "message": "boom"}]}
+    ) == "company_research"
 
 
-def test_route_after_critic():
-    passing = {"critique": CritiqueReport(resume_score=90, cover_letter_score=90,
-               interview_score=90, overall_pass=True), "revision_count": 1}
-    assert graph_mod.route_after_critic(passing) == "approve"
-
-    failing_under = {"critique": CritiqueReport(resume_score=10, cover_letter_score=10,
-                     interview_score=10, overall_pass=False), "revision_count": 2}
-    assert graph_mod.route_after_critic(failing_under) == "revise"
-
-    failing_at_max = {"critique": CritiqueReport(resume_score=10, cover_letter_score=10,
-                      interview_score=10, overall_pass=False), "revision_count": 3}
-    assert graph_mod.route_after_critic(failing_at_max) == "approve"
+def test_route_critic_decision():
+    assert graph_mod.route_critic_decision(
+        {"supervisor_decision": SupervisorDecision(next_action="approve")}
+    ) == "approve"
+    assert graph_mod.route_critic_decision(
+        {"supervisor_decision": SupervisorDecision(next_action="revise", docs_to_revise=["resume"])}
+    ) == "revise"
