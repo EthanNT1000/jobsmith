@@ -20,7 +20,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from bs4 import BeautifulSoup
 
-from app.sources.base import UA, clean
+from app.sources.base import UA, clean, http_get
 
 _104_JOB = re.compile(r"104\.com\.tw/job/(\w+)")
 _104_CONTENT = "https://www.104.com.tw/job/ajax/content/{jid}"
@@ -91,23 +91,75 @@ def _http_html(url: str) -> str:
     return content.decode(enc, errors="replace")
 
 
+def _s(x) -> str:
+    """只取字串值（避免把 dict/list 直接塞進 JD 變亂碼）。"""
+    return clean(x) if isinstance(x, str) else ""
+
+
+def _descs(items) -> str:
+    """list[{description}] → 頓號串接（職務類別/擅長工具/工作技能）。"""
+    if not isinstance(items, list):
+        return ""
+    return "、".join(clean(i.get("description", "")) for i in items
+                    if isinstance(i, dict) and i.get("description"))
+
+
+def _langs(items) -> str:
+    if not isinstance(items, list):
+        return ""
+    return "、".join(clean(i.get("language", "")) for i in items
+                    if isinstance(i, dict) and i.get("language"))
+
+
+def _addr(detail: dict) -> str:
+    return clean("".join(_s(detail.get(k)) for k in ("addressRegion", "addressArea", "addressDetail")))
+
+
+def _format_104(detail: dict, cond: dict) -> str:
+    """組出完整 JD：工作內容 + 工作條件 + 條件要求（盡量貼近 104 頁面分區）。"""
+    majors = "、".join(str(m) for m in cond.get("major")) if isinstance(cond.get("major"), list) else _s(cond.get("major"))
+    rows = [
+        ("【工作內容】", _s(detail.get("jobDescription"))),
+        ("職務類別：", _descs(detail.get("jobCategory"))),
+        ("工作待遇：", _s(detail.get("salary"))),
+        ("工作性質：", _s(detail.get("jobType")) or _descs(detail.get("workType"))),
+        ("上班地點：", _addr(detail)),
+        ("管理責任：", _s(detail.get("manageResp"))),
+        ("出差外派：", _s(detail.get("businessTrip"))),
+        ("上班時段：", _s(detail.get("workPeriod"))),
+        ("休假制度：", _s(detail.get("vacationPolicy"))),
+        ("可上班日：", _s(detail.get("startWorkingDay"))),
+        ("需求人數：", _s(detail.get("needEmp"))),
+        ("\n【條件要求】", ""),
+        ("工作經歷：", _s(cond.get("workExp"))),
+        ("學歷要求：", _s(cond.get("edu"))),
+        ("科系要求：", majors),
+        ("語文條件：", _langs(cond.get("language"))),
+        ("擅長工具：", _descs(cond.get("specialty"))),
+        ("工作技能：", _descs(cond.get("skill"))),
+        ("其他條件：", _s(cond.get("other"))),
+    ]
+    lines = []
+    for label, val in rows:
+        if label.startswith(("【", "\n【")):
+            lines.append(f"{label}\n{val}".rstrip())
+        elif val:
+            lines.append(f"{label}{val}")
+    return "\n".join(l for l in lines if l.strip())
+
+
 def _fetch_104(jid: str) -> JDFetchResult:
-    data = _http_json(_104_CONTENT.format(jid=jid),
-                      referer=f"https://www.104.com.tw/job/{jid}").get("data") or {}
+    # 104 content 走 requests（與搜尋同一管道，httpx 會被回 403）；host 由我們寫死、jid 為 \w+，無 SSRF 風險。
+    r = http_get(_104_CONTENT.format(jid=jid), referer=f"https://www.104.com.tw/job/{jid}")
+    if not getattr(r, "ok", False):
+        raise JDFetchError(f"104 內容讀取失敗（HTTP {getattr(r, 'status_code', '?')}），請改貼 JD 文字。")
+    data = r.json().get("data") or {}
     header = data.get("header") or {}
     detail = data.get("jobDetail") or {}
     cond = data.get("condition") or {}
     title = clean(header.get("jobName") or "")
     company = clean(header.get("custName") or "")
-    skills = "、".join(
-        s.get("description", "") for s in (cond.get("specialty") or []) if s.get("description"))
-    parts = [
-        detail.get("jobDescription") or "",
-        f"工作待遇：{detail.get('salary')}" if detail.get("salary") else "",
-        f"需求技能：{skills}" if skills else "",
-        cond.get("other") or "",
-    ]
-    text = clean("\n".join(p for p in parts if p))
+    text = clean(_format_104(detail, cond))
     if len(text) < _MIN_LEN:
         raise JDFetchError("104 職缺內容過短或無法解析，請改貼 JD 文字。")
     return JDFetchResult(title=title, company=company, text=text[:_MAX_TEXT], source="104")

@@ -3,25 +3,44 @@ import pytest
 from app.intake import jd_fetch
 
 
+class _FakeResp:
+    ok = True
+    status_code = 200
+
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
 def test_extracts_104_via_api(monkeypatch):
-    fake = {"data": {
+    payload = {"data": {
         "header": {"jobName": "資深 AI 工程師", "custName": "未來智能股份有限公司"},
         "jobDetail": {
             "jobDescription": "負責設計與開發多 agent LLM 系統，串接 RAG 與工具呼叫。",
             "salary": "月薪 70,000~100,000 元",
+            "jobCategory": [{"description": "軟體工程師"}],
         },
         "condition": {
+            "workExp": "2年以上",
+            "edu": "大學以上",
+            "major": ["資訊工程相關"],
+            "language": [{"language": "英文"}],
             "specialty": [{"description": "Python"}, {"description": "LangGraph"}],
+            "skill": [{"description": "LLM 應用"}],
             "other": "具 LLM 專案經驗者佳。",
         },
     }}
-    monkeypatch.setattr(jd_fetch, "_http_json", lambda url, referer: fake)
+    monkeypatch.setattr(jd_fetch, "http_get", lambda url, referer=None: _FakeResp(payload))
     res = jd_fetch.fetch_jd("https://www.104.com.tw/job/abcXYZ?jobsource=x")
     assert res.source == "104"
     assert res.title == "資深 AI 工程師"
     assert "未來智能" in res.company
     assert "多 agent" in res.text
-    assert "Python" in res.text  # 需求技能併入內文
+    assert "Python" in res.text                       # 擅長工具
+    assert "2年以上" in res.text and "大學以上" in res.text  # 條件要求併入
+    assert "資訊工程相關" in res.text                  # 科系要求併入
 
 
 def test_extracts_generic_html(monkeypatch):

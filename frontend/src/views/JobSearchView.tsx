@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import type { ChangeEvent, KeyboardEvent as ReactKeyboardEvent } from "react"
-import type { JobMatch, UserProfile, SkillGapReport } from "../types"
+import type { JobMatch, JobPosting, UserProfile, SkillGapReport } from "../types"
 import { readSSE } from "../sse"
 import { SAMPLE_RESUME } from "../sampleResume"
 import { Card } from "../ui/Card"
@@ -33,7 +33,7 @@ function FitBadge({ score }: { score: number }) {
 }
 
 // 一筆職缺卡（AI 推薦與指定公司共用）。
-function JobCard({ m, onPick }: { m: JobMatch; onPick: (m: JobMatch) => void }) {
+function JobCard({ m, onPick, pending }: { m: JobMatch; onPick: (m: JobMatch) => void; pending?: boolean }) {
   return (
     <Card interactive className="p-4 flex flex-col sm:flex-row gap-4 animate-fade-in-up">
       <FitBadge score={m.fit_score} />
@@ -56,7 +56,7 @@ function JobCard({ m, onPick }: { m: JobMatch; onPick: (m: JobMatch) => void }) 
         )}
       </div>
       <div className="shrink-0 flex flex-row sm:flex-col gap-2">
-        <Button size="sm" icon={Sparkles} onClick={() => onPick(m)} className="whitespace-nowrap">產生投遞包</Button>
+        <Button size="sm" icon={Sparkles} loading={pending} onClick={() => onPick(m)} className="whitespace-nowrap">產生投遞包</Button>
         <a href={m.job.url} target="_blank" rel="noreferrer"
           className="inline-flex items-center justify-center gap-1 px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-sm hover:bg-slate-200 transition whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300">
           <ExternalLink className="w-3.5 h-3.5" />看原職缺
@@ -67,7 +67,8 @@ function JobCard({ m, onPick }: { m: JobMatch; onPick: (m: JobMatch) => void }) 
 }
 
 // 一段可分頁的職缺清單（AI 推薦、指定公司各用一個，分頁互不影響）。
-function JobList({ matches, onPick }: { matches: JobMatch[]; onPick: (m: JobMatch) => void }) {
+function JobList({ matches, onPick, pickingUrl }:
+  { matches: JobMatch[]; onPick: (m: JobMatch) => void; pickingUrl: string }) {
   const [page, setPage] = useState(1)
   useEffect(() => { setPage(1) }, [matches])  // 新一輪結果回到第 1 頁
   const totalPages = Math.max(1, Math.ceil(matches.length / PAGE_SIZE))
@@ -76,7 +77,7 @@ function JobList({ matches, onPick }: { matches: JobMatch[]; onPick: (m: JobMatc
     <>
       <div className="space-y-3">
         {matches.slice((cur - 1) * PAGE_SIZE, cur * PAGE_SIZE).map((m, i) => (
-          <JobCard key={i} m={m} onPick={onPick} />
+          <JobCard key={i} m={m} onPick={onPick} pending={!!pickingUrl && m.job.url === pickingUrl} />
         ))}
       </div>
       {matches.length > PAGE_SIZE && (
@@ -122,6 +123,8 @@ export function JobSearchView(
   const [file, setFile] = useState<File | null>(null)
   // 這次送出時實際查詢的公司（用於「查無結果」提示，與輸入框內容脫鉤）。
   const [searchedCompanies, setSearchedCompanies] = useState<string[]>([])
+  // 正在抓完整 JD 的職缺網址（該卡片按鈕顯示載入中）。
+  const [pickingUrl, setPickingUrl] = useState("")
 
   // 還原上次搜尋結果：重新整理 / 重開不必重找。
   useEffect(() => {
@@ -235,9 +238,8 @@ export function JobSearchView(
     setFile(f); setError(""); e.target.value = ""
   }
 
-  function pick(m: JobMatch) {
-    const j = m.job
-    const jd = [
+  function buildJd(j: JobPosting): string {
+    return [
       j.title,
       `公司：${j.company}`,
       j.location ? `地點：${j.location}` : "",
@@ -246,6 +248,35 @@ export function JobSearchView(
       j.snippet || "",
       j.requirements.length ? `\n需求：${j.requirements.join("、")}` : "",
     ].filter(Boolean).join("\n")
+  }
+
+  // 產生投遞包前，先抓該職缺網址的「完整 JD」（104 走官方 content API），
+  // 抓不到才退回搜尋摘要——搜尋結果的 snippet 只有開頭一小段。
+  async function pick(m: JobMatch) {
+    const j = m.job
+    let jd = buildJd(j)
+    if (j.url) {
+      setPickingUrl(j.url)
+      try {
+        const r = await fetch("/api/jd/fetch", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: j.url }),
+        })
+        if (r.ok) {
+          const d = await r.json()
+          if (d.text && d.text.length > (j.snippet?.length || 0)) {
+            const head = [
+              d.title || j.title,
+              `公司：${d.company || j.company}`,
+              j.location ? `地點：${j.location}` : "",
+              j.salary ? `薪資：${j.salary}` : "",
+            ].filter(Boolean).join("\n")
+            jd = `${head}\n\n${d.text}`
+          }
+        }
+      } catch { /* 抓不到就用搜尋摘要 */ }
+      setPickingUrl("")
+    }
     onPick(jd, profile)
   }
 
@@ -424,7 +455,7 @@ export function JobSearchView(
         </Card>
       )}
 
-      {jobs.length > 0 && <JobList matches={jobs} onPick={pick} />}
+      {jobs.length > 0 && <JobList matches={jobs} onPick={pick} pickingUrl={pickingUrl} />}
 
       {/* ② 指定公司的職缺（獨立區塊、獨立排序） */}
       {(companyJobs.length > 0 || (done && searchedCompanies.length > 0)) && (
@@ -434,7 +465,7 @@ export function JobSearchView(
             {searchedCompanies.length > 0 && <span className="text-sm font-normal text-slate-400">{searchedCompanies.join("、")}</span>}
           </h2>
           {companyJobs.length > 0 ? (
-            <JobList matches={companyJobs} onPick={pick} />
+            <JobList matches={companyJobs} onPick={pick} pickingUrl={pickingUrl} />
           ) : (
             <Card className="p-2">
               <EmptyState icon={Building2} title="指定公司目前查無相關開缺"
