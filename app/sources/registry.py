@@ -4,13 +4,14 @@ from __future__ import annotations
 from urllib.parse import quote
 
 from app.models import SearchResult
-from app.sources import source_104, source_yourator, source_linkedin
+from app.sources import source_104, source_yourator, source_linkedin, source_cake
 
 # 可關鍵字搜尋的來源（name -> search 函式）
 SEARCHABLE = {
     source_104.NAME: source_104.search,
     source_yourator.NAME: source_yourator.search,
     source_linkedin.NAME: source_linkedin.search,
+    source_cake.NAME: source_cake.search,
 }
 
 # 尚未穩定、暫不啟用的來源（UI 標「即將支援」，避免永遠失敗的來源傷可信度）。

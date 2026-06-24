@@ -1,4 +1,8 @@
-"""Cake（cake.me）：盡力解析搜尋頁的 __NEXT_DATA__。結構較脆弱，失敗即降級。"""
+"""Cake（cake.me）：解析搜尋頁 __NEXT_DATA__ 的 initialState.jobSearch.entityByPathId。
+
+Cake 已改用 Algolia client-side 搜尋，但 SSR 仍把首頁結果放進 __NEXT_DATA__ 的
+initialState.jobSearch.entityByPathId（slug -> 職缺）。本機憑證鏈問題用 verify=False；失敗即降級。
+"""
 from __future__ import annotations
 
 import json
@@ -6,28 +10,35 @@ import re
 from urllib.parse import quote
 
 from app.models import JobPosting, SearchResult
-from app.sources.base import http_get
+from app.sources.base import clean, http_get
 
 NAME = "cake"
 SEARCHABLE = True
 _PAGE = "https://www.cake.me/jobs?q={kw}"
-_NEXT = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.DOTALL)
+_NEXT = re.compile(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.DOTALL)
+_SALARY_TYPE = {"per_year": "年薪", "per_month": "月薪", "per_day": "日薪", "per_hour": "時薪"}
 
 
-def _collect_jobs(node, out: list, depth: int = 0):
-    """遞迴在 __NEXT_DATA__ 找看起來像職缺的物件（含 title/path 且 path 指向 /jobs/）。"""
-    if depth > 8 or len(out) >= 40:
-        return
-    if isinstance(node, dict):
-        path = node.get("path") or node.get("link") or ""
-        title = node.get("title") or node.get("name")
-        if isinstance(path, str) and "/jobs/" in path and title:
-            out.append(node)
-        for v in node.values():
-            _collect_jobs(v, out, depth + 1)
-    elif isinstance(node, list):
-        for v in node:
-            _collect_jobs(v, out, depth + 1)
+def _format_salary(s) -> str | None:
+    """Cake salary：{min, max, currency, type} → 可讀字串。"""
+    if not isinstance(s, dict):
+        return None
+    try:
+        lo = int(s.get("min") or 0)
+        hi = int(s.get("max") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not lo and not hi:
+        return None
+    cur = s.get("currency") or ""
+    label = _SALARY_TYPE.get(s.get("type") or "", "")
+    if lo and hi and lo != hi:
+        amount = f"{cur} {lo:,}–{hi:,}"
+    elif hi:
+        amount = f"{cur} {hi:,}"
+    else:
+        amount = f"{cur} {lo:,} 以上"
+    return f"{label} {amount}".strip()
 
 
 def search(keywords: str, limit: int = 15) -> SearchResult:
@@ -39,28 +50,31 @@ def search(keywords: str, limit: int = 15) -> SearchResult:
         if not m:
             return SearchResult(source=NAME, blocked=True, error="找不到 __NEXT_DATA__")
         data = json.loads(m.group(1))
+        entities = (data.get("props", {}).get("pageProps", {})
+                    .get("initialState", {}).get("jobSearch", {}).get("entityByPathId", {}))
     except Exception as e:
         return SearchResult(source=NAME, blocked=True, error=str(e)[:150])
 
-    found: list = []
-    _collect_jobs(data, found)
-    seen, jobs = set(), []
-    for d in found:
-        path = d.get("path") or d.get("link") or ""
-        if path in seen:
+    jobs: list[JobPosting] = []
+    for d in (entities or {}).values():
+        if not isinstance(d, dict) or not d.get("title") or not d.get("path"):
             continue
-        seen.add(path)
-        comp = d.get("company") or {}
-        company = comp.get("name") if isinstance(comp, dict) else (d.get("company_name") or "")
-        url = path if str(path).startswith("http") else "https://www.cake.me" + str(path)
+        page = d.get("page") if isinstance(d.get("page"), dict) else {}
+        company_path = page.get("path") or ""
+        url = (f"https://www.cake.me/companies/{company_path}/jobs/{d['path']}"
+               if company_path else f"https://www.cake.me/jobs/{d['path']}")
+        locs = d.get("locations") or []
+        location = "、".join(str(x) for x in locs) if isinstance(locs, list) else None
+        tags = d.get("tags") or []
         jobs.append(JobPosting(
             source=NAME,
-            title=d.get("title") or d.get("name") or "",
-            company=company or "",
-            location=d.get("location") or None,
-            salary=d.get("salary") or None,
+            title=clean(d.get("title") or ""),
+            company=clean(page.get("name") or ""),
+            location=clean(location) or None,
+            salary=_format_salary(d.get("salary")),
             url=url,
-            snippet=(d.get("description") or "")[:200] or None,
+            snippet=clean((d.get("description") or "")[:200]) or None,
+            requirements=[str(t) for t in tags][:10] if isinstance(tags, list) else [],
         ))
         if len(jobs) >= limit:
             break

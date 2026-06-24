@@ -103,6 +103,37 @@ def test_source_cake_blocked_when_no_next_data(monkeypatch):
     assert res.blocked is True
 
 
+_CAKE_HTML = """<html><body>
+<script id="__NEXT_DATA__" type="application/json">
+{"props":{"pageProps":{"initialState":{"jobSearch":{"entityByPathId":{
+"ai-engineer-1":{"path":"ai-engineer-1","title":"AI Engineer","description":"Build LLM systems",
+"locations":["台北市, 台灣"],"salary":{"min":"1500000","max":"2100000","currency":"TWD","type":"per_year"},
+"tags":["Python","LLM"],"page":{"path":"swag","name":"SWAG"}}
+}}}}}}
+</script></body></html>"""
+
+
+def test_source_cake_parses_entity_state(monkeypatch):
+    monkeypatch.setattr(source_cake, "http_get", lambda *a, **k: FakeResp(text=_CAKE_HTML))
+    res = source_cake.search("AI", limit=5)
+    assert res.blocked is False
+    assert len(res.jobs) == 1
+    j = res.jobs[0]
+    assert j.title == "AI Engineer"
+    assert j.company == "SWAG"
+    assert j.url == "https://www.cake.me/companies/swag/jobs/ai-engineer-1"
+    assert j.salary == "年薪 TWD 1,500,000–2,100,000"
+    assert j.location == "台北市, 台灣"
+    assert "Python" in j.requirements
+
+
+def test_source_cake_blocked_when_no_entities(monkeypatch):
+    empty = ('<script id="__NEXT_DATA__" type="application/json">'
+             '{"props":{"pageProps":{"initialState":{"jobSearch":{"entityByPathId":{}}}}}}</script>')
+    monkeypatch.setattr(source_cake, "http_get", lambda *a, **k: FakeResp(text=empty))
+    assert source_cake.search("AI").blocked is True
+
+
 _LI_HTML = """
 <ul>
   <li><div class="base-card">
