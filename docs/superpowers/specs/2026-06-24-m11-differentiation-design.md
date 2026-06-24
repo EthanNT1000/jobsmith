@@ -4,7 +4,8 @@
 
 **目標**：在已完成的 M8（止血）/ M9（agent 深度）/ M10（英雄前端 + JD 抓取 + 匯出 + 4 來源 + CLI 上網查證）基礎上，加上「差異化 wow」與產品收尾，讓這個台灣 AI 求職 Co-pilot 更完整、更有作品集訊號。
 
-**本里程碑範圍（6 項，依施作順序）**：
+**本里程碑範圍（依施作順序）**：
+0. App shell 改側欄 rail + 本機 CLI chip（最先做，新分頁直接塞進 rail）
 1. 多輪面試模擬器
 2. 歷史紀錄／我的投遞包（sqlite，自動儲存）
 3. 推薦職缺無上限 + 分頁
@@ -27,6 +28,34 @@
 
 - 表 `packages`（歷史投遞包）：`id INTEGER PK`、`created_at TEXT`、`job_title`、`company`、`match_score INT`、`jd_text`、`profile_json`、`package_json`（完整成品：parsed_job/match/company/resume/cover/interview/critique）、`approved INT`。
 - 表 `user_memory`（單列，id=1）：`profile_json`、`preferences_json`（`{target_titles:[], seniority:"", tone:"", emphasize_skills:[]}`）、`updated_at`。
+
+---
+
+## ⓪ App shell：側欄 rail + 本機 CLI chip（仿 Open Design）
+
+**目的**：把目前頂部橫向 tab 換成「左側 icon+文字 rail + 右側內容區」的產品級 shell（容納 M11 新分頁、可擴充），並把後端切換重樣式成 Open Design 風格的「本機 CLI」chip。
+
+**佈局**：
+```
+┌────────┬──────────────────────────────────────────┐
+│ Brand  │ 頂部列                 [ 本機 CLI · Claude Code ▾ ]│
+│ 🔍自動找職缺                                          │
+│ 📊履歷健檢   ← 右側＝當前功能畫面 →                    │
+│ 🕸投遞包工作台                                        │
+│ 💬面試模擬                                            │
+│ 🗂我的投遞包                                          │
+│ ⚙個人化(底)                                          │
+└────────┴──────────────────────────────────────────┘
+```
+- **Rail**：圖示 + 中文標籤（寬約 200–220px）；頂部 Brand；區塊用 lucide 圖示；active 項 brand 底色（沿用 M10 segmented 風格，改直向）；底部「個人化」。所有分頁維持「全掛載只切顯示」以保留狀態。
+- **頂部列**：右側「本機 CLI · {Claude Code|Codex CLI} ▾」chip（重樣式 `BackendSelector`），下拉**只露 claude_cli / codex_cli**（anthropic 不在主選單；env 有金鑰時仍可用，但不顯眼）。模型分層（haiku/sonnet/opus by tier）以 tooltip 說明，不在 chip 選單選單一 model。
+- **行動裝置**：rail 收為底部 tab bar 或漢堡抽屜；頂部 chip 保留。
+
+**元件**：新增 `frontend/src/ui/Sidebar.tsx`（rail）；`App.tsx` 改 shell 佈局（rail + `<main>`）；`BackendSelector` 改為 chip 樣式並過濾為兩個 CLI。
+
+**測試**：`npm run build` 綠；切換分頁狀態保留；切換後端後續呼叫採用新後端（既有 `/api/backend` 行為不變）。
+
+> 後續 ①–⑥ 的新畫面（面試模擬、我的投遞包）都以 rail 分頁呈現；技能缺口/公司職缺/個人化依各自說明嵌入既有畫面或小面板。
 
 ---
 
@@ -134,7 +163,7 @@
 
 ## 施作順序與測試策略
 
-順序：① 面試模擬 → ② 歷史 → ③ 職缺分頁 → ④ 技能缺口 → ⑤ 記憶個人化 → ⑥ 公司職缺。
+順序：⓪ App shell（側欄 rail + CLI chip）→ ① 面試模擬 → ② 歷史 → ③ 職缺分頁 → ④ 技能缺口 → ⑤ 記憶個人化 → ⑥ 公司職缺。
 每項：後端 TDD（pytest）＋前端 `npm run build` 閘門；每項完成即 commit。全 milestone 結束跑對抗式審查 + 全套測試 + 使用者 run.bat 驗收。
 
 ## 風險與取捨
