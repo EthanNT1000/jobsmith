@@ -11,7 +11,7 @@ import { Button } from "../ui/Button"
 import { Badge } from "../ui/Badge"
 import { Skeleton } from "../ui/Skeleton"
 import { EmptyState } from "../ui/EmptyState"
-import { Search, Upload, Loader2, ExternalLink, AlertTriangle, CheckCircle2, XCircle, Building2, Layers, MapPin, X } from "../ui/icons"
+import { Search, Upload, Loader2, ExternalLink, AlertTriangle, CheckCircle2, XCircle, Building2, Layers, MapPin, X, ChevronUp, ChevronDown } from "../ui/icons"
 
 const SNAP_KEY = "copilot.jobsearch.v1"  // 上次搜尋結果快取（重新整理/重開沿用）
 
@@ -69,6 +69,7 @@ export function JobSearchView(
   const [file, setFile] = useState<File | null>(null)
   const [searchedCompanies, setSearchedCompanies] = useState<string[]>([])
   const [pages, setPages] = useState(2)  // 每個來源抓幾頁（越多越全、但越慢）
+  const [formOpen, setFormOpen] = useState(true)  // 有結果後收合搜尋表單，從別頁回來直接看職缺列表
 
   const abortRef = useRef<AbortController | null>(null)  // 取消上一個未完成的搜尋
 
@@ -91,7 +92,8 @@ export function JobSearchView(
       if (typeof s.pages === "number") setPages(s.pages)
       if (Array.isArray(s.regions)) setRegions(s.regions)
       if (s.profile) { setProfile(s.profile as UserProfile); onProfile?.(s.profile as UserProfile) }
-      if (Array.isArray(s.jobs) && s.jobs.length) setDone(true)
+      if (Array.isArray(s.jobs) && s.jobs.length) { setDone(true); setFormOpen(false) }
+      else if (Array.isArray(s.companyJobs) && s.companyJobs.length) { setDone(true); setFormOpen(false) }
     } catch { /* 忽略毀損快取 */ }
     // 僅開啟時還原一次；onProfile 為穩定的 setState，不需列入依賴。
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -182,6 +184,7 @@ export function JobSearchView(
         else if (ev.type === "done") setDone(true)
       })
       await saveSearch(acc, cs)  // 自動存進「搜尋紀錄」
+      if (acc.jobs.length || acc.companyJobs.length) setFormOpen(false)  // 有結果就收合表單、凸顯職缺列表
     } catch (e) {
       if ((e as Error)?.name === "AbortError") return  // 被新搜尋取消 → 靜默
       setError("連線發生問題，請確認伺服器是否啟動。")
@@ -214,9 +217,19 @@ export function JobSearchView(
   const visibleJobs = jobs.filter(passes)
   const visibleCompany = companyJobs.filter(passes)
   const hiddenCount = (jobs.length - visibleJobs.length) + (companyJobs.length - visibleCompany.length)
+  const hasResults = jobs.length > 0 || companyJobs.length > 0
 
   return (
     <div>
+      {hasResults && (
+        <div className="mb-4 flex justify-end">
+          <Button variant="secondary" size="sm" icon={formOpen ? ChevronUp : ChevronDown}
+            onClick={() => setFormOpen((o) => !o)}>
+            {formOpen ? "收合搜尋條件" : "修改搜尋條件 / 重新搜尋"}
+          </Button>
+        </div>
+      )}
+      {(formOpen || !hasResults) && (
       <Card className="p-5 mb-5">
         <p className="text-sm text-slate-600 mb-2">
           丟上你的履歷，AI 自動推導關鍵字、搜尋 104 / Yourator / LinkedIn / Cake 並依履歷排序；
@@ -338,6 +351,7 @@ export function JobSearchView(
           </div>
         )}
       </Card>
+      )}
 
       {blockedNote && (
         <div className="mb-3 text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3 flex items-start gap-2">

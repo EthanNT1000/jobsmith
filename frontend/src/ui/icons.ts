@@ -40,6 +40,7 @@ export {
   Archive,
   Settings2,
   ChevronDown,
+  ChevronUp,
   ChevronLeft,
   ChevronRight,
   Trash2,

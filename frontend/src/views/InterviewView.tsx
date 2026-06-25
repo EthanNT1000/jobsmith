@@ -94,7 +94,8 @@ export function InterviewView(
   async function startPackageSession(p: PkgPick) {
     const key = "pkg-" + p.id
     if (sessions.some((s) => s.key === key)) { setCurrentKey(key); return }
-    setSessions((ss) => [...ss, newSession(key, p.job_title)])
+    const title = p.company ? `${p.company}｜${p.job_title}` : p.job_title
+    setSessions((ss) => [...ss, newSession(key, title)])
     setCurrentKey(key)
     try {
       const d = await (await fetch(`/api/history/${p.id}`)).json()
