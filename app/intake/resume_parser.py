@@ -8,6 +8,7 @@ from io import BytesIO
 # \x00 之後被當成 CLI 參數丟進 subprocess 會直接 ValueError("embedded null byte")，
 # 其餘 C0/C1 控制字元也只是 LLM 雜訊。保留常見空白（\t \n \r），其餘一律移除。
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+MAX_PDF_PAGES = 20
 
 
 def _clean(text: str) -> str:
@@ -31,7 +32,11 @@ def _extract_pdf(data: bytes) -> str:
     from pypdf import PdfReader
 
     reader = PdfReader(BytesIO(data))
-    parts = [page.extract_text() or "" for page in reader.pages]
+    parts: list[str] = []
+    for idx, page in enumerate(reader.pages):
+        if idx >= MAX_PDF_PAGES:
+            break
+        parts.append(page.extract_text() or "")
     return "\n".join(parts).strip()
 
 

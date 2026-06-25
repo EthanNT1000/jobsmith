@@ -88,6 +88,7 @@ _byok: dict[str, str] = {
     "api_key": os.environ.get("OPENAI_API_KEY", "").strip(),
     "model": os.environ.get("OPENAI_MODEL", "").strip(),
 }
+_ENV_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def _env_file() -> Path:
@@ -109,15 +110,35 @@ def byok_model() -> str:
 
 def byok_public() -> dict:
     """供 UI：回設定狀態，但不外洩完整金鑰（只回是否已設定）。"""
-    return {"base_url": _byok["base_url"], "model": _byok["model"], "has_key": bool(_byok["api_key"])}
+    return {
+        "base_url": _byok["base_url"],
+        "model": _byok["model"],
+        "has_key": bool(_byok["api_key"]),
+    }
 
 
-def set_byok(base_url: str = "", api_key: str = "", model: str = "", *, persist: bool = True) -> None:
+def _env_value(name: str, value: str) -> str:
+    raw = value or ""
+    if _ENV_CONTROL_CHARS.search(raw):
+        raise ValueError(f"{name} must not contain control characters")
+    return raw.strip()
+
+
+def set_byok(
+    base_url: str = "",
+    api_key: str = "",
+    model: str = "",
+    *,
+    persist: bool = True,
+) -> None:
     """更新 BYOK 設定。api_key 為空 = 保留既有金鑰（UI 不會回傳真實金鑰，避免被清空）。"""
-    _byok["base_url"] = (base_url or "").strip()
-    _byok["model"] = (model or "").strip()
-    if (api_key or "").strip():
-        _byok["api_key"] = api_key.strip()
+    clean_base_url = _env_value("OPENAI_BASE_URL", base_url)
+    clean_model = _env_value("OPENAI_MODEL", model)
+    clean_api_key = _env_value("OPENAI_API_KEY", api_key)
+    _byok["base_url"] = clean_base_url
+    _byok["model"] = clean_model
+    if clean_api_key:
+        _byok["api_key"] = clean_api_key
     if persist:
         _write_env({
             "OPENAI_BASE_URL": _byok["base_url"],
@@ -128,12 +149,13 @@ def set_byok(base_url: str = "", api_key: str = "", model: str = "", *, persist:
 
 def _write_env(updates: dict[str, str]) -> None:
     """把 key=value upsert 進 .env（保留其他行、不加引號）；值為空則移除該行。寫檔失敗不致命。"""
+    safe_updates = {key: _env_value(key, val) for key, val in updates.items()}
     path = _env_file()
     try:
         lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     except Exception:
         lines = []
-    remaining = dict(updates)
+    remaining = dict(safe_updates)
     out: list[str] = []
     for line in lines:
         m = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*=", line)

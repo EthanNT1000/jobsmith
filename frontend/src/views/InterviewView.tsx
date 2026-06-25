@@ -161,7 +161,11 @@ export function InterviewView(
 
   // 從「我的投遞包」用該份 JD + 履歷直接開面試（由 seed.nonce 外部訊號觸發）。
   useEffect(() => {
-    if (seed?.jd) startSession("seed-" + seed.nonce, jdTitle(seed.jd), seed.jd, seed.profile ?? fallbackProfile ?? null)
+    if (!seed?.jd) return
+    const timer = window.setTimeout(() => {
+      void startSession("seed-" + seed.nonce, jdTitle(seed.jd), seed.jd, seed.profile ?? fallbackProfile ?? null)
+    }, 0)
+    return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.nonce])
 
@@ -169,7 +173,6 @@ export function InterviewView(
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (active && currentKey === null) loadPackages()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, currentKey])
 
   const tabs = sessions.length > 0 && (

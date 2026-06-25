@@ -54,3 +54,10 @@ def delete_search(sid: int) -> None:
     with db.LOCK:
         conn.execute("DELETE FROM searches WHERE id=?", (sid,))
         conn.commit()
+
+
+def delete_all_searches() -> None:
+    conn = db.get_conn()
+    with db.LOCK:
+        conn.execute("DELETE FROM searches")
+        conn.commit()

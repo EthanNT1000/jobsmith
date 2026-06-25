@@ -176,6 +176,7 @@ export function JobSearchView(
     setStatus("上傳中…")
     // 串流累積（供完成後存檔；state 更新非同步，存檔讀這裡的即時值）。
     const acc: SearchAcc = { jobs: [], companyJobs: [], queries: [], sources: [], linkedin: "", fallback: false, profile: null }
+    let hadError = false
     try {
       const resp = await fetch("/api/jobs/auto", { method: "POST", body: form, signal: ctrl.signal })
       await readSSE(resp, (ev: JobsAutoEvent) => {
@@ -191,10 +192,12 @@ export function JobSearchView(
         }
         else if (ev.type === "company_jobs") { acc.companyJobs = sortByFit(ev.data as JobMatch[]); setCompanyJobs(acc.companyJobs) }
         else if (ev.type === "linkedin") { acc.linkedin = ev.url; setLinkedin(ev.url) }
-        else if (ev.type === "error") setError(ev.message)
+        else if (ev.type === "error") { hadError = true; setError(ev.message) }
         else if (ev.type === "done") setDone(true)
       })
-      await saveSearch(acc, cs)  // 自動存進「搜尋紀錄」
+      if (!hadError && (acc.jobs.length || acc.companyJobs.length)) {
+        await saveSearch(acc, cs)  // 自動存進「搜尋紀錄」
+      }
       if (acc.jobs.length || acc.companyJobs.length) setFormOpen(false)  // 有結果就收合表單、凸顯職缺列表
     } catch (e) {
       if ((e as Error)?.name === "AbortError") return  // 被新搜尋取消 → 靜默

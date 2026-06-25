@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from app.settings import MODEL_TIERS, get_model
 
 
@@ -14,3 +16,8 @@ def test_get_model_rejects_unknown_tier():
     import pytest
     with pytest.raises(KeyError):
         get_model("nope")
+
+
+def test_requirements_include_openai_backend_dependency():
+    requirements = Path("requirements.txt").read_text(encoding="utf-8")
+    assert "langchain-openai" in requirements

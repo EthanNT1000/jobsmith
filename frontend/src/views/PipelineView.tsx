@@ -82,10 +82,12 @@ export function PipelineView(
     stopPoll()
     poll.current = { thread: threadId, since: 0, timer: null }
     setPhase("running"); setStatus("產生中…")
+    let failures = 0
     const tick = async () => {
       try {
         const r = await fetch(`/api/run/events/${threadId}?since=${poll.current.since}`)
         const d = await r.json()
+        failures = 0
         if (!d.found) { await loadFromHistory(packageId); return }  // 已清理/伺服器重啟 → 改載歷史
         const events: RunEvent[] = d.events || []
         poll.current.since += events.length
@@ -93,6 +95,8 @@ export function PipelineView(
         if (d.done) { stopPoll(); setPhase("done"); return }
         poll.current.timer = window.setTimeout(tick, 900)
       } catch {
+        failures += 1
+        if (failures >= 2) setStatus("重新連線中...")
         poll.current.timer = window.setTimeout(tick, 1500)
       }
     }
@@ -147,19 +151,24 @@ export function PipelineView(
 
   // 從「自動找職缺」帶 JD 進來 → 立刻在背景產生（seed.nonce 外部訊號觸發）。
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (seed?.jd) run(seed.jd, seed.profile)
+    if (!seed?.jd) return
+    const timer = window.setTimeout(() => {
+      void run(seed.jd, seed.profile)
+    }, 0)
+    return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.nonce])
 
   // 從「我的投遞包」點進行中的那筆 → 接回該背景產生看即時進度（watch.nonce 外部訊號觸發）。
   useEffect(() => {
-    if (watch?.threadId) {
+    if (!watch?.threadId) return
+    const timer = window.setTimeout(() => {
       resetView(); setJd(watch.title || "")
       localStorage.setItem(RUN_KEY, JSON.stringify(
         { threadId: watch.threadId, packageId: watch.packageId, jd: watch.title || "" }))
       startPolling(watch.threadId, watch.packageId)
-    }
+    }, 0)
+    return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watch?.nonce])
 

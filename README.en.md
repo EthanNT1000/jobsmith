@@ -8,9 +8,9 @@
 
 Find jobs, audit your résumé, and generate tailored application packages — résumé, cover letter, interview prep, and company research. Generation runs **in the background** (it keeps going if you navigate away or refresh, and multiple jobs run in parallel); you watch the live multi-agent trace, then review and approve each package in your library.
 
-Runs **locally** on your own **Claude Code / Codex CLI** subscription (no API key, no quota) — or **bring your own key** for any OpenAI-compatible model.
+Runs through your own **Claude Code / Codex CLI** subscription (no separate API key required) — or **bring your own key** for any OpenAI-compatible model.
 
-[繁體中文](README.md) · [**Download (Windows)**](#download) · [Quick Start](#quick-start-from-source) · [Architecture](#architecture)
+[繁體中文](README.md) · [**Download (Windows)**](#download) · [Quick Start](#quick-start-from-source) · [Architecture](#architecture) · [Privacy](docs/PRIVACY.md)
 
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
@@ -21,7 +21,7 @@ Runs **locally** on your own **Claude Code / Codex CLI** subscription (no API ke
 
 </div>
 
-> The app UI is in Traditional Chinese, tailored to Taiwan's job-search conventions (104 / Cake / Yourator / LinkedIn). Your résumé and data never leave your machine.
+> The app UI is in Traditional Chinese, tailored to Taiwan's job-search conventions (104 / Cake / Yourator / LinkedIn). Data is stored locally by default; when you run AI features, your résumé and prompts are handled by the CLI or BYOK backend you choose. See [Privacy and Data Handling](docs/PRIVACY.md).
 
 ---
 
@@ -50,7 +50,7 @@ Runs **locally** on your own **Claude Code / Codex CLI** subscription (no API ke
    - **Local CLI** — a logged-in **Claude Code** (`claude`) or **Codex CLI** (`codex`) on your `PATH`, **or**
    - **BYOK** — `base_url` + `api_key` + `model` for any OpenAI-compatible endpoint (OpenAI, DeepSeek, Gemini, Groq, OpenRouter, Ollama, LM Studio, vLLM…).
 
-> **Requirements:** Windows 10/11 (64-bit; WebView2 is built into Windows 11). Your history, settings, and `.env` are saved next to the `.exe` — nothing is uploaded.
+> **Requirements:** Windows 10/11 (64-bit; WebView2 is built into Windows 11). Your history, settings, and `.env` are saved next to the `.exe`; Jobsmith does not operate a hosted backend, and AI requests go only to the backend you choose.
 
 ## Quick Start (from source)
 
@@ -82,6 +82,7 @@ To build your own `.exe`: `pip install pyinstaller && pyinstaller jobsmith.spec 
 - [Quick Start](#quick-start-from-source)
 - [Features](#features)
 - [LLM Backends](#llm-backends)
+- [Privacy and Data](#privacy-and-data)
 - [Architecture](#architecture)
 - [Evaluation](#evaluation)
 - [Tech Stack](#tech-stack)
@@ -112,7 +113,13 @@ Pick your AI engine from the **top-right control panel** — a **local CLI subsc
 | `codex_cli`  | Codex subscription                     | No API key. Model selectable; defaults to your Codex config.                                             |
 | `openai`     | BYOK — any OpenAI-compatible endpoint  | `base_url` + `api_key` + `model`. Works with OpenAI, DeepSeek, Gemini, Groq, OpenRouter, Ollama, LM Studio, vLLM… |
 
-CLI subscriptions run **locally** and bind to the logged-in CLI on your machine, so your résumé never leaves your computer. BYOK credentials are written only to your local `.env` and never transmitted. An API-key backend (`anthropic`) also exists for self-hosting or CI.
+CLI backends call the corresponding provider through the logged-in CLI on your machine. BYOK calls the OpenAI-compatible endpoint you configure. Jobsmith does not operate a hosted backend or send your data to the project maintainer's server. BYOK credentials are written only to your local `.env`. An API-key backend (`anthropic`) also exists for self-hosting or CI.
+
+## Privacy and Data
+
+Jobsmith stores profile memory, preferences, searches, generated packages, `.env`, and error logs locally. You can open **Settings → Clear personal data** to remove resume memory, searches, and generated package history; AI backend settings are kept so you do not need to re-enter API keys.
+
+When you run AI features, your résumé, job descriptions, and prompts are sent to the AI backend you selected. Read [Privacy and Data Handling](docs/PRIVACY.md) before using the app with sensitive data.
 
 ## Architecture
 
@@ -186,6 +193,7 @@ desktop.py    # native-window launcher    jobsmith.spec  # PyInstaller build
 ```bash
 pytest                         # unit/integration suite (live API tests skipped by default)
 pytest -m live                 # include tests that call the real API
+cd frontend && npm run lint    # frontend lint
 cd frontend && npm run build   # type-check + production build
 ```
 
@@ -199,7 +207,7 @@ cd frontend && npm run build   # type-check + production build
 
 ## Contributing
 
-Issues and pull requests are welcome. For non-trivial changes, please open an issue first to discuss the approach. Run `pytest` and `npm run build` before submitting.
+Issues and pull requests are welcome. For non-trivial changes, please open an issue first to discuss the approach. Run `pytest`, `npm run lint`, and `npm run build` before submitting. Before publishing a Windows `.exe`, run the clean-environment smoke test in the [Release Checklist](docs/RELEASE_CHECKLIST.md).
 
 ## Disclaimer
 

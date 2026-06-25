@@ -39,6 +39,7 @@ export default function App() {
   // 使用者真實履歷（自動找職缺解析後共用），讓「投遞包工作台」分頁手動開跑也能用本人背景。
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [preferences, setPreferences] = useState<Preferences>({})
+  const [privacyVersion, setPrivacyVersion] = useState(0)
   // 開場引導：第一次使用先選 AI 後端並測試連線；確認過後記在 localStorage 不再跳出。
   const [showOnboard, setShowOnboard] = useState(
     () => localStorage.getItem("copilot.backend.confirmed") !== "1")
@@ -77,6 +78,15 @@ export default function App() {
     setShowOnboard(false)
   }
 
+  function clearPersonalState() {
+    setProfile(null)
+    setPreferences({})
+    setSeed(null)
+    setInterviewSeed(null)
+    setWatch(null)
+    setPrivacyVersion((v) => v + 1)
+  }
+
   return (
     <div className="min-h-screen flex">
       {showOnboard && <Onboarding onDone={finishOnboard} />}
@@ -99,28 +109,28 @@ export default function App() {
           )}
 
           {/* 分頁全掛載只切顯示，保留狀態 */}
-          <div className={tab === "search" ? "" : "hidden"}>
+          <div key={`search-${privacyVersion}`} className={tab === "search" ? "" : "hidden"}>
             <JobSearchView onPick={pickJob} onProfile={setProfile}
               formOpen={searchFormOpen} setFormOpen={setSearchFormOpen} onHasResults={setSearchHasResults} />
           </div>
-          <div className={tab === "searches" ? "" : "hidden"}>
+          <div key={`searches-${privacyVersion}`} className={tab === "searches" ? "" : "hidden"}>
             <SearchHistoryView active={tab === "searches"} onPick={pickJob} />
           </div>
-          <div className={tab === "resume" ? "" : "hidden"}>
+          <div key={`resume-${privacyVersion}`} className={tab === "resume" ? "" : "hidden"}>
             <ResumeHealthView onProfile={setProfile} />
           </div>
-          <div className={tab === "pipeline" ? "" : "hidden"}>
+          <div key={`pipeline-${privacyVersion}`} className={tab === "pipeline" ? "" : "hidden"}>
             <PipelineView seed={seed} fallbackProfile={profile} preferences={preferences}
               watch={watch} onBack={() => setTab("search")} />
           </div>
-          <div className={tab === "interview" ? "" : "hidden"}>
+          <div key={`interview-${privacyVersion}`} className={tab === "interview" ? "" : "hidden"}>
             <InterviewView active={tab === "interview"} fallbackProfile={profile} seed={interviewSeed} />
           </div>
-          <div className={tab === "history" ? "" : "hidden"}>
+          <div key={`history-${privacyVersion}`} className={tab === "history" ? "" : "hidden"}>
             <HistoryView active={tab === "history"} onReopen={pickJob} onInterview={startInterview} onWatch={watchRun} />
           </div>
           <div className={tab === "settings" ? "" : "hidden"}>
-            <PreferencesView value={preferences} onSave={setPreferences} />
+            <PreferencesView value={preferences} onSave={setPreferences} onClearData={clearPersonalState} />
           </div>
         </div>
       </div>

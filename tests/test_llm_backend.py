@@ -1,8 +1,8 @@
 import importlib
 from pathlib import Path
 
-import app.settings as settings_mod
 import app.llm as llm_mod
+import app.settings as settings_mod
 
 
 def _reload(monkeypatch, backend):
@@ -116,6 +116,26 @@ def test_set_byok_persists_to_env(monkeypatch):
         settings_mod.set_byok("https://api.x.com/v1", "", "gpt-4o")
         assert settings_mod.byok_api_key() == "sk-secret"
         assert settings_mod.byok_model() == "gpt-4o"
+    finally:
+        env.unlink(missing_ok=True)
+
+
+def test_set_byok_rejects_env_newline_in_values(monkeypatch):
+    import pytest
+
+    env = Path("_byok_settings_injection_test.env")
+    env.unlink(missing_ok=True)
+    monkeypatch.setenv("COPILOT_ENV_FILE", str(env))
+    importlib.reload(settings_mod)
+    try:
+        with pytest.raises(ValueError):
+            settings_mod.set_byok(
+                "https://api.example/v1\nOPENAI_API_KEY=leaked",
+                "sk-secret",
+                "gpt-4o",
+            )
+        if env.exists():
+            assert "OPENAI_API_KEY=leaked" not in env.read_text(encoding="utf-8")
     finally:
         env.unlink(missing_ok=True)
 

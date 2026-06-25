@@ -2,6 +2,8 @@
 import json
 import os
 import shutil
+import subprocess
+import sys
 import threading
 import traceback
 import uuid
@@ -48,6 +50,36 @@ if (_FRONTEND_DIST / "assets").is_dir():
     app.mount("/assets", StaticFiles(directory=str(_FRONTEND_DIST / "assets")), name="assets")
 
 _ERROR_LOG = _ROOT / "data" / "error.log"
+_MAX_RESUME_UPLOAD_BYTES = 5 * 1024 * 1024
+
+
+def _open_folder(path: Path) -> None:
+    folder = path.resolve()
+    if os.name == "nt":
+        os.startfile(str(folder))  # type: ignore[attr-defined]
+        return
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    subprocess.Popen([opener, str(folder)])
+
+
+def _read_resume_upload(file: UploadFile) -> bytes:
+    data = file.file.read(_MAX_RESUME_UPLOAD_BYTES + 1)
+    if len(data) > _MAX_RESUME_UPLOAD_BYTES:
+        max_mb = _MAX_RESUME_UPLOAD_BYTES // (1024 * 1024)
+        raise ValueError(f"resume file is too large (max {max_mb} MB)")
+    return data
+
+
+def _resume_text_from_request(file: UploadFile | None, resume_text: str) -> tuple[str, str | None]:
+    if file is None:
+        return resume_text, None
+    try:
+        data = _read_resume_upload(file)
+        return extract_text(data, file.filename or "resume.txt"), None
+    except ValueError as exc:
+        return "", str(exc)
+    except Exception as exc:  # noqa: BLE001
+        return "", f"resume file could not be parsed: {_err_detail(exc)}"
 
 
 def _err_detail(exc: Exception) -> str:
@@ -169,11 +201,8 @@ class RunBody(BaseModel):
     # 使用者真實履歷結構（由 /api/jobs/auto 或 /api/resume/evaluate 的 profile 事件帶入）。
     # 缺省時才退回 demo profile（CLI / 測試後備）。
     profile: dict | None = None
-    profile_path: str = "data/demo_profile.json"
     # 個人化偏好（語氣/目標職稱/年資/想強調技能）；套進 profile 讓各生成 agent 採用。
     preferences: dict | None = None
-    # 批次模式：清單逐一無人值守產生時為 True，跳過互動核可、直接存成「待審」。
-    batch: bool = False
 
 
 # 注意：以下兩個串流端點用一般 def（非 async def），讓 Starlette 在 threadpool 執行
@@ -183,14 +212,13 @@ def resume_evaluate(
     file: UploadFile | None = File(default=None),
     resume_text: str = Form(default=""),
 ):
-    if file is not None:
-        data = file.file.read()
-        text = extract_text(data, file.filename or "resume.txt")
-    else:
-        text = resume_text
+    text, text_error = _resume_text_from_request(file, resume_text)
 
     def gen():
         yield _sse({"type": "start"})
+        if text_error:
+            yield _sse({"type": "error", "message": text_error})
+            return
         if not text.strip():
             yield _sse({"type": "error", "message": "請提供履歷檔案或文字"})
             return
@@ -262,15 +290,14 @@ def jobs_auto(
     pages = max(1, min(5, pages))
     region_keys = regions.parse_keys(region)
     area = regions.area_codes(region_keys)
-    if file is not None:
-        data = file.file.read()
-        text = extract_text(data, file.filename or "resume.txt")
-    else:
-        text = resume_text
+    text, text_error = _resume_text_from_request(file, resume_text)
     company_list = _parse_companies(companies)
 
     def gen():
         yield _sse({"type": "start"})
+        if text_error:
+            yield _sse({"type": "error", "message": text_error})
+            return
         if not text.strip():
             yield _sse({"type": "error", "message": "請提供履歷檔案或文字"})
             return
@@ -503,7 +530,10 @@ class ByokBody(BaseModel):
 @app.post("/api/backend/byok")
 def post_backend_byok(body: ByokBody):
     """儲存 BYOK（OpenAI 相容）設定並寫回 .env；api_key 留空則保留既有金鑰。"""
-    settings.set_byok(body.base_url, body.api_key, body.model)
+    try:
+        settings.set_byok(body.base_url, body.api_key, body.model)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
     return {"byok": settings.byok_public()}
 
 
@@ -569,7 +599,6 @@ class InterviewStartBody(BaseModel):
     jd_text: str
     profile: dict | None = None
     n: int = 6
-    profile_path: str = "data/demo_profile.json"
 
 
 class InterviewAnswerBody(BaseModel):
@@ -577,7 +606,6 @@ class InterviewAnswerBody(BaseModel):
     question: str
     answer: str
     profile: dict | None = None
-    profile_path: str = "data/demo_profile.json"
 
 
 class InterviewSummaryBody(BaseModel):
@@ -614,7 +642,6 @@ class PipelineChatBody(BaseModel):
     current: str = ""                 # 目前文件內容（供上下文）
     jd_text: str = ""
     profile: dict | None = None
-    profile_path: str = "data/demo_profile.json"
     messages: list[dict] = []          # [{role: user|assistant, content}]
 
 
@@ -658,10 +685,7 @@ def _resolve_profile(body: RunBody) -> Profile:
         if not (p.name.strip() or p.summary.strip()):
             raise ValueError("履歷缺少姓名與定位，無法產生投遞包，請重新上傳履歷。")
         return p
-    profile_path = body.profile_path
-    if not Path(profile_path).is_absolute():
-        profile_path = str(_ROOT / profile_path)
-    return load_profile(profile_path)
+    return load_profile(str(_ROOT / "data" / "demo_profile.json"))
 
 
 def _apply_preferences(profile: Profile, prefs: dict | None) -> Profile:
@@ -749,6 +773,36 @@ class PreferencesBody(BaseModel):
 @app.post("/api/memory")
 def memory_post(body: PreferencesBody):
     _memory.save_preferences(body.preferences)
+    return {"ok": True}
+
+
+@app.delete("/api/privacy-data")
+def privacy_data_delete():
+    """Clear locally stored resume/profile data, saved searches, and generated packages."""
+    _memory.clear_memory()
+    _searches.delete_all_searches()
+    _history.delete_all_packages()
+    with _RUNS_LOCK:
+        _RUNS.clear()
+    return {"ok": True}
+
+
+@app.get("/api/diagnostics")
+def diagnostics_get():
+    return {
+        "error_log": str(_ERROR_LOG),
+        "log_dir": str(_ERROR_LOG.parent),
+        "app_db": os.environ.get("COPILOT_APP_DB", str(_ROOT / "data" / "app.sqlite")),
+    }
+
+
+@app.post("/api/diagnostics/open-log-folder")
+def diagnostics_open_log_folder():
+    _ERROR_LOG.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        _open_folder(_ERROR_LOG.parent)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     return {"ok": True}
 
 

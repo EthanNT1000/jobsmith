@@ -131,3 +131,10 @@ def delete_package(pid: int) -> None:
     with db.LOCK:
         conn.execute("DELETE FROM packages WHERE id=?", (pid,))
         conn.commit()
+
+
+def delete_all_packages() -> None:
+    conn = db.get_conn()
+    with db.LOCK:
+        conn.execute("DELETE FROM packages")
+        conn.commit()

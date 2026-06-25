@@ -45,3 +45,10 @@ def save_profile(profile: dict) -> None:
 
 def save_preferences(prefs: dict) -> None:
     _upsert(preferences_json=json.dumps(prefs, ensure_ascii=False))
+
+
+def clear_memory() -> None:
+    conn = db.get_conn()
+    with db.LOCK:
+        conn.execute("DELETE FROM user_memory WHERE id=1")
+        conn.commit()

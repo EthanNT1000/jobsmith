@@ -8,9 +8,9 @@
 
 找職缺、履歷健檢、產生客製投遞包（履歷・求職信・面試準備・公司情報）、模擬面試。產生投遞包是**背景工作**（離開頁面或重新整理都不中斷，還能多個職缺平行跑）；看完多 agent 即時編排，再到「我的投遞包」逐一核可。
 
-預設用你本機的 **Claude Code / Codex CLI 訂閱**當 AI 引擎（**免 API key、不吃額度**），也能**自備金鑰**接任何 OpenAI 相容模型。
+預設用你本機的 **Claude Code / Codex CLI 訂閱**當 AI 引擎（**免自行申請 API key**），也能**自備金鑰**接任何 OpenAI 相容模型。
 
-[English](README.en.md) · [**下載（Windows）**](#下載) · [快速開始](#快速開始從原始碼) · [系統架構](#系統架構)
+[English](README.en.md) · [**下載（Windows）**](#下載) · [快速開始](#快速開始從原始碼) · [系統架構](#系統架構) · [隱私](docs/PRIVACY.md)
 
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
@@ -21,7 +21,7 @@
 
 </div>
 
-> 應用程式介面為繁體中文，貼合台灣求職生態（104 / Cake / Yourator / LinkedIn）。你的履歷與資料都不會離開你的電腦。
+> 應用程式介面為繁體中文，貼合台灣求職生態（104 / Cake / Yourator / LinkedIn）。資料以本機保存為主；執行 AI 功能時，履歷與 prompt 會交給你選擇的 CLI 或 BYOK 後端處理。詳見 [隱私與資料處理](docs/PRIVACY.md)。
 
 ---
 
@@ -50,7 +50,7 @@
    - **本機 CLI**——PATH 上已登入的 **Claude Code**（`claude`）或 **Codex CLI**（`codex`），或
    - **BYOK**——填 `base_url` + `api_key` + `model` 接任何 OpenAI 相容端點（OpenAI、DeepSeek、Gemini、Groq、OpenRouter、Ollama、LM Studio、vLLM…）。
 
-> **需求：** Windows 10/11（64 位元；WebView2 為 Windows 11 內建）。歷史、設定、`.env` 都存在 exe 旁邊——不會上傳任何東西。
+> **需求：** Windows 10/11（64 位元；WebView2 為 Windows 11 內建）。歷史、設定、`.env` 都存在 exe 旁邊；Jobsmith 不營運 hosted backend，AI 請求只會送到你選擇的後端。
 
 ## 快速開始（從原始碼）
 
@@ -82,6 +82,7 @@ desktop.bat          # 以原生桌面視窗啟動（推薦）
 - [快速開始](#快速開始從原始碼)
 - [功能](#功能)
 - [LLM 後端](#llm-後端)
+- [隱私與資料](#隱私與資料)
 - [系統架構](#系統架構)
 - [成效評測](#成效評測)
 - [技術棧](#技術棧)
@@ -112,7 +113,13 @@ desktop.bat          # 以原生桌面視窗啟動（推薦）
 | `codex_cli`  | Codex 訂閱                        | 免 API key。模型可自選；預設沿用你的 Codex 設定。                                      |
 | `openai`     | BYOK——任何 OpenAI 相容端點        | `base_url` + `api_key` + `model`。可接 OpenAI、DeepSeek、Gemini、Groq、OpenRouter、Ollama、LM Studio、vLLM…  |
 
-CLI 訂閱在**本機**執行、綁定你機器上登入的 CLI，履歷不會離開你的電腦。BYOK 金鑰只寫進你本機的 `.env`、不會外傳。另有 API key 後端（`anthropic`）供自架或 CI 使用。
+CLI 後端會透過你機器上已登入的 CLI 呼叫對應 provider；BYOK 會呼叫你設定的 OpenAI-compatible endpoint。Jobsmith 不提供 hosted backend，也不把資料送到專案作者的伺服器。BYOK 金鑰只寫進你本機的 `.env`。另有 API key 後端（`anthropic`）供自架或 CI 使用。
+
+## 隱私與資料
+
+Jobsmith 會在本機保存履歷記憶、偏好、搜尋紀錄、投遞包、`.env` 與錯誤紀錄。你可以在 **設定 → 清除個人資料** 清掉履歷記憶、搜尋紀錄與投遞包；AI 後端設定會保留，避免重填 API key。
+
+執行 AI 功能時，履歷、職缺描述與 prompt 會送到你選擇的 AI 後端。請先閱讀 [隱私與資料處理](docs/PRIVACY.md)。
 
 ## 系統架構
 
@@ -185,6 +192,7 @@ desktop.py    # 原生視窗啟動器      jobsmith.spec  # PyInstaller 打包
 ```bash
 pytest                         # 單元/整合測試（預設略過 live API 測試）
 pytest -m live                 # 含真打 API 的測試
+cd frontend && npm run lint    # 前端 lint
 cd frontend && npm run build   # 型別檢查 + 正式建置
 ```
 
@@ -198,7 +206,7 @@ cd frontend && npm run build   # 型別檢查 + 正式建置
 
 ## 貢獻
 
-歡迎 issue 與 pull request。較大的變更請先開 issue 討論方向。提交前請跑 `pytest` 與 `npm run build`。
+歡迎 issue 與 pull request。較大的變更請先開 issue 討論方向。提交前請跑 `pytest`、`npm run lint` 與 `npm run build`。發佈 Windows `.exe` 前請照 [Release Checklist](docs/RELEASE_CHECKLIST.md) 做一次乾淨環境 smoke test。
 
 ## 免責聲明
 

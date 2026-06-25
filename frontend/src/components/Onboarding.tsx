@@ -1,22 +1,28 @@
 import { useEffect, useState } from "react"
 import { Brand } from "../ui/Brand"
 import { Button } from "../ui/Button"
-import { Cpu, CheckCircle2, XCircle, Loader2, ArrowRight } from "../ui/icons"
+import { Cpu, CheckCircle2, XCircle, Loader2, ArrowRight, KeyRound } from "../ui/icons"
 
-interface BackendOption { id: string; label: string; available: boolean }
+interface BackendOption { id: string; label: string; available: boolean; kind: string }
+interface BackendData {
+  options?: BackendOption[]
+  current?: string
+  byok?: { base_url?: string; model?: string; has_key?: boolean }
+}
 
-// 仿 Open Design 的開場：先讓使用者選本機 CLI（Claude Code / Codex CLI）並做連線測試，
-// 確認可用再進入主畫面；之後仍可在右上角自由切換。
+const ONBOARD_IDS = ["claude_cli", "codex_cli", "openai"]
 const CLI_IDS = ["claude_cli", "codex_cli"]
 
 const DESC: Record<string, string> = {
-  claude_cli: "用你的 Claude 訂閱（claude -p），免 API key、不吃額度。",
-  codex_cli: "用你的 Codex 訂閱（codex exec），免 API key。",
+  claude_cli: "使用本機 Claude Code CLI，不需要在本 App 內輸入 API key。",
+  codex_cli: "使用本機 Codex CLI，不需要在本 App 內輸入 API key。",
+  openai: "使用 OpenAI 相容端點，適合 OpenAI、DeepSeek、Groq、OpenRouter、Ollama、LM Studio。",
 }
 
 export function Onboarding({ onDone }: { onDone: () => void }) {
   const [options, setOptions] = useState<BackendOption[]>([])
   const [selected, setSelected] = useState("")
+  const [byok, setByok] = useState({ base_url: "", api_key: "", model: "" })
   const [testing, setTesting] = useState(false)
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
   const [starting, setStarting] = useState(false)
@@ -24,29 +30,60 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   useEffect(() => {
     fetch("/api/backend")
       .then((r) => r.json())
-      .then((d: { options?: BackendOption[]; current?: string }) => {
-        const opts = (d.options || []).filter((o) => CLI_IDS.includes(o.id))
+      .then((d: BackendData) => {
+        const opts = (d.options || []).filter((o) => ONBOARD_IDS.includes(o.id))
         setOptions(opts)
-        const firstAvail = opts.find((o) => o.available)
-        setSelected(d.current && CLI_IDS.includes(d.current) ? d.current : (firstAvail?.id || opts[0]?.id || ""))
+        setByok({
+          base_url: d.byok?.base_url || "",
+          api_key: "",
+          model: d.byok?.model || "",
+        })
+        const firstAvail = opts.find((o) => o.id !== "openai" && o.available)
+        setSelected(
+          d.current && ONBOARD_IDS.includes(d.current)
+            ? d.current
+            : (firstAvail?.id || "openai"),
+        )
       })
-      .catch(() => {})
+      .catch(() => {
+        setOptions([{ id: "openai", label: "OpenAI 相容端點 (BYOK)", available: true, kind: "byok" }])
+        setSelected("openai")
+      })
   }, [])
 
   function choose(id: string) {
-    setSelected(id); setResult(null)
+    setSelected(id)
+    setResult(null)
+  }
+
+  async function saveByokIfNeeded() {
+    if (selected !== "openai") return true
+    const r = await fetch("/api/backend/byok", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(byok),
+    })
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}))
+      setResult({ ok: false, message: d.error || "BYOK 設定格式不正確。" })
+      return false
+    }
+    return true
   }
 
   async function test() {
     if (!selected) return
-    setTesting(true); setResult(null)
+    setTesting(true)
+    setResult(null)
     try {
+      if (!(await saveByokIfNeeded())) return
       const r = await fetch("/api/backend/test", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ backend: selected }),
       })
       const d = await r.json()
-      setResult({ ok: Boolean(d.ok), message: d.message || (d.ok ? "連線成功" : "連線失敗") })
+      setResult({ ok: Boolean(d.ok), message: d.message || (d.ok ? "測試成功" : "測試失敗") })
     } catch {
       setResult({ ok: false, message: "連線發生問題，請確認伺服器是否啟動。" })
     } finally {
@@ -58,8 +95,10 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     if (!selected) return
     setStarting(true)
     try {
+      if (!(await saveByokIfNeeded())) return
       await fetch("/api/backend", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ backend: selected }),
       })
       onDone()
@@ -68,34 +107,40 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     }
   }
 
+  const selectedKind = selected === "openai" ? "byok" : "cli"
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm grid place-items-center p-4">
       <div className="w-full max-w-lg bg-white rounded-xl2 shadow-cardHover p-6 animate-fade-in-up">
         <div className="mb-5"><Brand /></div>
-        <h1 className="text-lg font-bold text-slate-900 mb-1">先選擇你的 AI 後端</h1>
+        <h1 className="text-lg font-bold text-slate-900 mb-1">選擇 AI 後端</h1>
         <p className="text-sm text-slate-500 mb-4">
-          本工具用你本機的 CLI 訂閱當 AI 引擎（免 API key）。選一個就能開始；想確認可先「測試連線」（非必須）。
-          之後也能在右上角隨時切換，或改用 OpenAI 相容（BYOK）。
+          可以使用本機 Claude/Codex CLI，也可以用 OpenAI 相容端點 (BYOK)。選好後可先測試連線。
         </p>
 
         <div className="space-y-2.5">
           {options.map((o) => {
             const active = selected === o.id
+            const isByok = o.id === "openai"
+            const disabled = !isByok && !o.available
+            const Icon = isByok ? KeyRound : Cpu
             return (
               <button key={o.id} type="button" onClick={() => choose(o.id)}
-                disabled={!o.available}
+                disabled={disabled}
                 aria-pressed={active}
                 className={`w-full text-left rounded-xl border p-4 flex items-start gap-3 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 ${
                   active ? "border-brand-500 bg-brand-50/60 ring-1 ring-brand-200"
                     : "border-slate-200 hover:bg-slate-50"
-                } ${o.available ? "" : "opacity-50 cursor-not-allowed"}`}>
+                } ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}>
                 <span className={`grid place-items-center w-9 h-9 rounded-lg shrink-0 ${active ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-500"}`}>
-                  <Cpu className="w-5 h-5" />
+                  <Icon className="w-5 h-5" />
                 </span>
                 <span className="flex-1 min-w-0">
                   <span className="flex items-center gap-2">
                     <span className="font-medium text-slate-900">{o.label}</span>
-                    {!o.available && <span className="text-xs text-slate-400">（未偵測到）</span>}
+                    {CLI_IDS.includes(o.id) && !o.available && (
+                      <span className="text-xs text-slate-400">未偵測到</span>
+                    )}
                   </span>
                   <span className="block text-sm text-slate-500 mt-0.5">{DESC[o.id] || ""}</span>
                 </span>
@@ -103,6 +148,20 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             )
           })}
         </div>
+
+        {selectedKind === "byok" && (
+          <div className="mt-4 space-y-2">
+            <input value={byok.base_url} onChange={(e) => setByok((b) => ({ ...b, base_url: e.target.value }))}
+              placeholder="Base URL，例如 https://api.deepseek.com/v1" aria-label="Base URL"
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-200" />
+            <input value={byok.api_key} onChange={(e) => setByok((b) => ({ ...b, api_key: e.target.value }))}
+              type="password" autoComplete="off" placeholder="API Key" aria-label="API Key"
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-200" />
+            <input value={byok.model} onChange={(e) => setByok((b) => ({ ...b, model: e.target.value }))}
+              placeholder="Model，例如 deepseek-chat / gpt-4o-mini" aria-label="Model"
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-200" />
+          </div>
+        )}
 
         {result && (
           <div className={`mt-4 text-sm rounded-lg p-3 flex items-center gap-2 ${
@@ -115,7 +174,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         <div className="mt-5 flex items-center gap-3">
           <Button variant="secondary" onClick={test} loading={testing}
             disabled={!selected || starting}
-            icon={testing ? undefined : Cpu}>
+            icon={testing ? undefined : selectedKind === "byok" ? KeyRound : Cpu}>
             {testing ? "測試中…" : "測試連線"}
           </Button>
           <Button onClick={start} loading={starting} disabled={!selected || testing} icon={ArrowRight}>
@@ -123,12 +182,12 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           </Button>
           <button type="button" onClick={onDone}
             className="ml-auto text-sm text-slate-400 hover:text-slate-600 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300">
-            先略過
+            跳過
           </button>
         </div>
         {testing && (
           <p className="text-xs text-slate-400 mt-2 flex items-center gap-1">
-            <Loader2 className="w-3 h-3 animate-spin" />首次呼叫 CLI 可能需要數秒，請稍候。
+            <Loader2 className="w-3 h-3 animate-spin" />測試可能需要幾秒鐘。
           </p>
         )}
       </div>

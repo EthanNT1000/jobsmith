@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react"
 import type { Preferences } from "../types"
+import { clearLocalPersonalData } from "../lib/privacy"
 import { Card } from "../ui/Card"
 import { Button } from "../ui/Button"
-import { Settings2, CheckCircle2 } from "../ui/icons"
+import { Settings2, CheckCircle2, Trash2, FileText } from "../ui/icons"
 
 const TONES = ["自信專業", "務實低調", "親切熱忱", "簡潔有力"]
 
@@ -11,14 +12,21 @@ function split(s: string): string[] {
 }
 
 export function PreferencesView(
-  { value, onSave }: { value: Preferences; onSave: (p: Preferences) => void },
+  { value, onSave, onClearData }:
+  { value: Preferences; onSave: (p: Preferences) => void; onClearData?: () => void },
 ) {
   const [titles, setTitles] = useState((value.target_titles || []).join("、"))
   const [seniority, setSeniority] = useState(value.seniority || "")
   const [tone, setTone] = useState(value.tone || "")
   const [skills, setSkills] = useState((value.emphasize_skills || []).join("、"))
   const [busy, setBusy] = useState(false)
+  const [clearing, setClearing] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [cleared, setCleared] = useState(false)
+  const [clearError, setClearError] = useState("")
+  const [diagnostics, setDiagnostics] = useState<{ error_log: string; log_dir: string } | null>(null)
+  const [diagnosticsError, setDiagnosticsError] = useState("")
+  const [openingLog, setOpeningLog] = useState(false)
 
   // 記憶是非同步載入的：value 由 {} 變成已存偏好時，把欄位同步回填，
   // 否則開「個人化」分頁會看到空白表單（甚至誤存空值蓋掉既有偏好）。
@@ -30,6 +38,13 @@ export function PreferencesView(
     setTone(value.tone || "")
     setSkills((value.emphasize_skills || []).join("、"))
   }, [value])
+
+  useEffect(() => {
+    fetch("/api/diagnostics")
+      .then((r) => r.json())
+      .then((d) => setDiagnostics(d))
+      .catch(() => {})
+  }, [])
 
   async function save() {
     setBusy(true); setSaved(false)
@@ -44,6 +59,36 @@ export function PreferencesView(
       })
       if (r.ok) { onSave(prefs); setSaved(true) }
     } finally { setBusy(false) }
+  }
+
+  async function clearData() {
+    const ok = window.confirm("這會清除本機履歷快取、搜尋紀錄、投遞包歷史與後端記住的履歷/偏好。確定要繼續？")
+    if (!ok) return
+    setClearing(true); setCleared(false); setClearError("")
+    try {
+      const r = await fetch("/api/privacy-data", { method: "DELETE" })
+      if (!r.ok) throw new Error("clear failed")
+      clearLocalPersonalData()
+      setTitles(""); setSeniority(""); setTone(""); setSkills("")
+      onClearData?.()
+      setCleared(true)
+    } catch {
+      setClearError("清除失敗，請稍後再試。")
+    } finally {
+      setClearing(false)
+    }
+  }
+
+  async function openLogFolder() {
+    setOpeningLog(true); setDiagnosticsError("")
+    try {
+      const r = await fetch("/api/diagnostics/open-log-folder", { method: "POST" })
+      if (!r.ok) throw new Error("open failed")
+    } catch {
+      setDiagnosticsError("無法自動開啟資料夾，請手動開啟下方路徑。")
+    } finally {
+      setOpeningLog(false)
+    }
   }
 
   const field = "w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-200"
@@ -84,6 +129,36 @@ export function PreferencesView(
           <Button onClick={save} loading={busy} icon={CheckCircle2}>儲存偏好</Button>
           {saved && <span className="text-sm text-emerald-600 inline-flex items-center gap-1"><CheckCircle2 className="w-4 h-4" />已儲存</span>}
         </div>
+      </Card>
+      <Card className="p-5 mt-5 border-rose-200 bg-rose-50/40">
+        <h3 className="font-semibold text-sm text-rose-900 mb-1">清除個人資料</h3>
+        <p className="text-sm text-rose-700 mb-3">
+          清除本機履歷快取、搜尋紀錄、投遞包歷史，以及後端記住的履歷與偏好。AI 後端設定不會被清除。
+        </p>
+        <Button variant="danger" icon={Trash2} loading={clearing} onClick={clearData}>
+          清除個人資料
+        </Button>
+        {cleared && (
+          <span className="ml-3 text-sm text-emerald-700 inline-flex items-center gap-1">
+            <CheckCircle2 className="w-4 h-4" />已清除
+          </span>
+        )}
+        {clearError && <p className="text-sm text-rose-700 mt-2">{clearError}</p>}
+      </Card>
+      <Card className="p-5 mt-5">
+        <h3 className="font-semibold text-sm text-slate-900 mb-1">錯誤記錄與回報</h3>
+        <p className="text-sm text-slate-600 mb-3">
+          如果 App 無法啟動、AI 後端失敗或畫面卡住，回報 issue 時請附上錯誤記錄。
+        </p>
+        <Button variant="secondary" icon={FileText} loading={openingLog} onClick={openLogFolder}>
+          開啟錯誤記錄資料夾
+        </Button>
+        {diagnostics?.error_log && (
+          <p className="text-xs text-slate-500 mt-3 break-all">
+            error.log: {diagnostics.error_log}
+          </p>
+        )}
+        {diagnosticsError && <p className="text-sm text-rose-600 mt-2">{diagnosticsError}</p>}
       </Card>
     </div>
   )

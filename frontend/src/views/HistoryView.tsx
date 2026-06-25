@@ -53,7 +53,6 @@ export function HistoryView(
   }
   // 切到此分頁（active）時載入清單；資料載入是 effect 的正當用途。
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (active) refresh()
     return () => { if (pollTimer.current) window.clearTimeout(pollTimer.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
