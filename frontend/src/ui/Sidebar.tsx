@@ -29,7 +29,7 @@ export function Sidebar<T extends string>(
   )
 
   return (
-    <aside className="no-print shrink-0 w-16 md:w-52 border-r border-slate-200 bg-white/70 backdrop-blur flex flex-col">
+    <aside className="no-print shrink-0 w-16 md:w-52 border-r border-slate-200 bg-white/70 backdrop-blur flex flex-col sticky top-0 h-screen">
       <div className="flex items-center gap-2 px-3 md:px-4 h-16 border-b border-slate-100">
         <Logomark size={28} />
         <div className="hidden md:block font-display font-bold text-base leading-none">

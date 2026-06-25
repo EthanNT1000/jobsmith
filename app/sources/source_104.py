@@ -44,16 +44,19 @@ def _format_salary(d: dict) -> str | None:
     return f"{label} {amount}".strip()
 
 
-def search(keywords: str, limit: int = 15, pages: int = 1) -> SearchResult:
+def search(keywords: str, limit: int = 15, pages: int = 1,
+           area: list[str] | None = None) -> SearchResult:
     """搜尋 104；pages>1 時逐頁抓取（API 吃 page 參數）並跨頁去重。
 
+    area：104 地區代碼清單（來源端篩選，逗號串接帶入 &area=）；空則不限地區。
     blocked 僅看第一頁：第一頁失敗才降級；後續頁失敗就停在已收到的結果。
     """
     jobs: list[JobPosting] = []
     seen: set[str] = set()
+    area_q = ("&area=" + quote(",".join(area))) if area else ""
     for page in range(1, max(1, pages) + 1):
         try:
-            r = http_get(_API.format(kw=quote(keywords), page=page), referer=_REFERER)
+            r = http_get(_API.format(kw=quote(keywords), page=page) + area_q, referer=_REFERER)
             if not r.ok:
                 if page == 1:
                     return SearchResult(source=NAME, blocked=True, error=f"HTTP {r.status_code}")

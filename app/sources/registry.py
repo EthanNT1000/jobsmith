@@ -20,10 +20,11 @@ COMING_SOON: dict[str, str] = {}
 
 
 def search_all(keywords: str, sources: list[str] | None = None, limit: int = 15,
-               pages: int = 1) -> list[SearchResult]:
+               pages: int = 1, area: list[str] | None = None) -> list[SearchResult]:
     """對選定來源『並行』各跑一次搜尋；單一來源失敗只回該來源 blocked，不影響其他。
 
     pages>1 時各來源逐頁抓取（每來源最多約 limit×pages 筆）。
+    area：地區代碼清單，傳給各來源（目前 104 於來源端篩選，其餘來源忽略、由上層結果端過濾）。
     結果固定依 names 的順序回傳（與並行無關），方便上層彙整與測試。
     """
     names = [n for n in (sources or list(SEARCHABLE)) if n in SEARCHABLE]
@@ -31,7 +32,7 @@ def search_all(keywords: str, sources: list[str] | None = None, limit: int = 15,
         return []
     out: dict[str, SearchResult] = {}
     with ThreadPoolExecutor(max_workers=len(names)) as ex:
-        futs = {ex.submit(SEARCHABLE[n], keywords, limit, pages): n for n in names}
+        futs = {ex.submit(SEARCHABLE[n], keywords, limit, pages, area): n for n in names}
         for fut in as_completed(futs):
             n = futs[fut]
             try:
@@ -41,6 +42,6 @@ def search_all(keywords: str, sources: list[str] | None = None, limit: int = 15,
     return [out[n] for n in names]
 
 
-def linkedin_search_url(keywords: str) -> str:
-    """LinkedIn 不爬整頁：產生預填關鍵字的台灣職缺搜尋深連結。"""
-    return f"https://www.linkedin.com/jobs/search/?keywords={quote(keywords)}&location=Taiwan"
+def linkedin_search_url(keywords: str, location: str = "Taiwan") -> str:
+    """LinkedIn 不爬整頁：產生預填關鍵字（與地區）的職缺搜尋深連結。"""
+    return f"https://www.linkedin.com/jobs/search/?keywords={quote(keywords)}&location={quote(location)}"

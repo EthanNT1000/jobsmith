@@ -21,6 +21,7 @@ from app.agents.resume_eval import structure_profile, evaluate_resume
 from app.agents.job_search import derive_queries, rank_jobs
 from app.agents.company_jobs import find_company_jobs
 from app.sources.registry import search_all, linkedin_search_url
+from app.sources import regions
 
 from app.store import db as _appdb
 from app.store import history as _history
@@ -190,12 +191,17 @@ def jobs_auto(
     resume_text: str = Form(default=""),
     companies: str = Form(default=""),
     pages: int = Form(default=2),
+    region: str = Form(default=""),
 ):
     """履歷 → 自動找職缺：解析履歷 → 推導關鍵字 → 搜尋多站 →（選填）併入指定公司的開缺 → 依履歷排序。
 
     pages：每個來源抓幾頁（使用者可在前端調整，預設 2、夾在 1–5）。
+    region：搜尋前選定的縣市（逗號串接 key）。對所有來源一致生效——104 於來源端用 area
+            代碼篩選（涵蓋更全），其餘來源在結果端用 location 過濾，使用者看到的就是同一份地區結果。
     """
     pages = max(1, min(5, pages))
+    region_keys = regions.parse_keys(region)
+    area = regions.area_codes(region_keys)
     if file is not None:
         data = file.file.read()
         text = extract_text(data, file.filename or "resume.txt")
@@ -225,10 +231,13 @@ def jobs_auto(
             resume_jobs = []
             for q in queries[:3]:
                 yield _sse({"type": "progress", "step": "search", "message": f"搜尋「{q}」中…"})
-                for res in search_all(q, limit=15, pages=pages):
+                for res in search_all(q, limit=15, pages=pages, area=area):
+                    # 104 已於來源端用 area 篩過；其餘來源在結果端依 location 過濾，地區一致生效。
+                    kept = [j for j in res.jobs
+                            if res.source == "104" or regions.match_location(j.location, region_keys)]
                     yield _sse({"type": "source", "source": res.source,
-                                "count": len(res.jobs), "blocked": res.blocked})
-                    for j in res.jobs:
+                                "count": len(kept), "blocked": res.blocked})
+                    for j in kept:
                         key = j.url or (j.title + j.company)
                         if key in seen:
                             continue
@@ -252,7 +261,9 @@ def jobs_auto(
             for batch in _rank_in_batches(profile, resume_jobs):
                 matches.extend(batch)
                 yield _sse({"type": "ranked_batch", "data": [m.model_dump() for m in batch]})
-            yield _sse({"type": "linkedin", "url": linkedin_search_url(queries[0] if queries else "")})
+            li_loc = f"{region_keys[0]}, Taiwan" if region_keys else "Taiwan"
+            yield _sse({"type": "linkedin",
+                        "url": linkedin_search_url(queries[0] if queries else "", li_loc)})
 
             # ② 使用者指定的公司開缺：與 AI 搜尋『分開』收集、分開排序、分開顯示，
             # 避免低適配的公司職缺佔據 AI 推薦名單前段、又吃掉排序名額。

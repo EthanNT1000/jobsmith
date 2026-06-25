@@ -26,28 +26,15 @@ type SearchAcc = {
 const sortByFit = (arr: JobMatch[]) =>
   [...arr].sort((a, b) => b.fit_score - a.fit_score || (a.job.url < b.job.url ? -1 : a.job.url > b.job.url ? 1 : 0))
 
-// 適配色帶分段篩選（內部仍用 fit_score）：全部 / 中以上(≥60) / 高(≥80)。
-const FIT_BANDS = [{ v: 0, l: "全部" }, { v: 60, l: "中以上" }, { v: 80, l: "高" }]
+// 適配色帶分段篩選（內部仍用 fit_score）：全部 / 高(≥80) / 中以上(≥60)。
+const FIT_BANDS = [{ v: 0, l: "全部" }, { v: 80, l: "高" }, { v: 60, l: "中以上" }]
 
-// 地區篩選（依職缺 location 子字串比對；含常見中英別名）。
-const REGIONS: { key: string; aliases: string[] }[] = [
-  { key: "台北", aliases: ["台北", "臺北", "taipei"] },
-  { key: "新北", aliases: ["新北", "new taipei"] },
-  { key: "桃園", aliases: ["桃園", "taoyuan"] },
-  { key: "新竹", aliases: ["新竹", "hsinchu"] },
-  { key: "台中", aliases: ["台中", "臺中", "taichung"] },
-  { key: "台南", aliases: ["台南", "臺南", "tainan"] },
-  { key: "高雄", aliases: ["高雄", "kaohsiung"] },
-  { key: "遠端", aliases: ["遠端", "remote", "在家"] },
+// 搜尋地點（縣市，對應後端 app/sources/regions.py）：搜尋前選定、所有來源一致生效；不選＝全台。
+const COUNTIES = [
+  "台北市", "新北市", "桃園市", "台中市", "台南市", "高雄市",
+  "基隆市", "新竹縣市", "苗栗縣", "彰化縣", "南投縣", "雲林縣",
+  "嘉義縣市", "屏東縣", "宜蘭縣", "花蓮縣", "台東縣",
 ]
-function matchRegion(loc: string | null | undefined, selected: string[]): boolean {
-  if (!selected.length) return true
-  const l = (loc || "").toLowerCase()
-  return selected.some((k) => {
-    const r = REGIONS.find((x) => x.key === k)
-    return r ? r.aliases.some((a) => l.includes(a.toLowerCase())) : false
-  })
-}
 
 function mergeSource(arr: SourceStat[], ev: { source: string; count: number; blocked: boolean }): SourceStat[] {
   const idx = arr.findIndex((x) => x.source === ev.source)
@@ -71,7 +58,7 @@ export function JobSearchView(
   const [companyJobs, setCompanyJobs] = useState<JobMatch[]>([])
   const [rankTotal, setRankTotal] = useState(0)
   const [minFit, setMinFit] = useState(0)            // 適配色帶門檻（0/60/80）
-  const [regions, setRegions] = useState<string[]>([])  // 地區篩選（空 = 全部）
+  const [regions, setRegions] = useState<string[]>([])  // 搜尋地點（縣市 key；空 = 全台）
   const [linkedin, setLinkedin] = useState("")
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [blockedNote, setBlockedNote] = useState("")
@@ -102,6 +89,7 @@ export function JobSearchView(
       if (typeof s.fallback === "boolean") setFallback(s.fallback)
       if (Array.isArray(s.searchedCompanies)) setSearchedCompanies(s.searchedCompanies)
       if (typeof s.pages === "number") setPages(s.pages)
+      if (Array.isArray(s.regions)) setRegions(s.regions)
       if (s.profile) { setProfile(s.profile as UserProfile); onProfile?.(s.profile as UserProfile) }
       if (Array.isArray(s.jobs) && s.jobs.length) setDone(true)
     } catch { /* 忽略毀損快取 */ }
@@ -114,11 +102,11 @@ export function JobSearchView(
     try {
       localStorage.setItem(SNAP_KEY, JSON.stringify({
         text, companies, jobs, companyJobs, queries, sources,
-        linkedin, fallback, searchedCompanies, profile, pages,
+        linkedin, fallback, searchedCompanies, profile, pages, regions,
       }))
     } catch { /* localStorage 不可用/已滿則略過 */ }
   }, [done, jobs, companyJobs, queries, sources, linkedin, fallback,
-      searchedCompanies, profile, text, companies, pages])
+      searchedCompanies, profile, text, companies, pages, regions])
 
   function addCompany(name: string) {
     const n = name.trim()
@@ -212,6 +200,7 @@ export function JobSearchView(
       setError("請先貼上履歷文字，或上傳履歷檔案"); return
     }
     form.append("pages", String(pages))
+    if (regions.length) form.append("region", regions.join(","))
     go(form)
   }
   function onFile(e: ChangeEvent<HTMLInputElement>) {
@@ -221,11 +210,10 @@ export function JobSearchView(
 
   const pick = async (m: JobMatch) => onPick(await resolveJd(m.job), profile)
 
-  const passes = (m: JobMatch) => m.fit_score >= minFit && matchRegion(m.job.location, regions)
+  const passes = (m: JobMatch) => m.fit_score >= minFit  // 地區已在搜尋時於後端套用
   const visibleJobs = jobs.filter(passes)
   const visibleCompany = companyJobs.filter(passes)
   const hiddenCount = (jobs.length - visibleJobs.length) + (companyJobs.length - visibleCompany.length)
-  const hasResults = jobs.length > 0 || companyJobs.length > 0
 
   return (
     <div>
@@ -297,6 +285,28 @@ export function JobSearchView(
           <span className="text-xs text-slate-400">頁數越多找得越全，但搜尋與評分也越久（預設 2 頁）。</span>
         </div>
 
+        <div className="mt-4">
+          <label className="text-sm font-medium text-slate-700 mb-1.5 flex items-center gap-1.5">
+            <MapPin className="w-4 h-4 text-slate-400" />搜尋地點（選填、可多選；不選＝全台）
+          </label>
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" onClick={() => setRegions([])} disabled={busy} aria-pressed={regions.length === 0}
+              className={`px-2.5 py-1 rounded-lg border text-xs transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:opacity-50 ${
+                regions.length === 0 ? "bg-brand-600 text-white border-brand-600" : "bg-white border-slate-300 text-slate-600 hover:bg-slate-50"
+              }`}>不限縣市</button>
+            {COUNTIES.map((c) => {
+              const on = regions.includes(c)
+              return (
+                <button key={c} type="button" onClick={() => toggleRegion(c)} disabled={busy} aria-pressed={on}
+                  className={`px-2.5 py-1 rounded-lg border text-xs transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:opacity-50 ${
+                    on ? "bg-brand-600 text-white border-brand-600" : "bg-white border-slate-300 text-slate-600 hover:bg-slate-50"
+                  }`}>{c}</button>
+              )
+            })}
+          </div>
+          <p className="text-xs text-slate-400 mt-1">選了縣市就只找那些地區的職缺，所有來源一致生效（104 直接從來源端篩，其餘來源依職缺地點過濾）。</p>
+        </div>
+
         <div className="flex flex-wrap gap-2 mt-4 items-center">
           <Button onClick={onStart} loading={busy} icon={Search}>開始自動找職缺</Button>
           <Button variant="secondary" onClick={() => { setFile(null); setText(SAMPLE_RESUME) }} disabled={busy}>載入範例履歷</Button>
@@ -365,26 +375,6 @@ export function JobSearchView(
         </div>
       )}
 
-      {/* 地區篩選 */}
-      {hasResults && (
-        <div className="flex flex-wrap items-center gap-1.5 mb-3 text-sm">
-          <span className="text-slate-500 inline-flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />地區</span>
-          {REGIONS.map((r) => {
-            const on = regions.includes(r.key)
-            return (
-              <button key={r.key} type="button" onClick={() => toggleRegion(r.key)} aria-pressed={on}
-                className={`px-2.5 py-1 rounded-full border text-xs transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 ${
-                  on ? "bg-brand-600 text-white border-brand-600" : "bg-white border-slate-300 text-slate-600 hover:bg-slate-50"
-                }`}>{r.key}</button>
-            )
-          })}
-          {regions.length > 0 && (
-            <button type="button" onClick={() => setRegions([])}
-              className="text-xs text-slate-400 hover:text-slate-600 ml-1 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300">清除</button>
-          )}
-        </div>
-      )}
-
       {busy && jobs.length === 0 && (
         <div className="space-y-3">
           {[0, 1, 2].map((i) => (
@@ -418,7 +408,7 @@ export function JobSearchView(
 
       {visibleJobs.length > 0 && <JobList matches={visibleJobs} onPick={pick} />}
       {jobs.length > 0 && visibleJobs.length === 0 && (
-        <p className="text-sm text-slate-400">目前篩選（適配／地區）沒有符合的職缺，放寬條件看看。</p>
+        <p className="text-sm text-slate-400">目前適配篩選沒有符合的職缺，放寬條件看看。</p>
       )}
 
       {/* 指定公司的職缺（獨立區塊、獨立排序） */}
@@ -431,7 +421,7 @@ export function JobSearchView(
           {visibleCompany.length > 0 ? (
             <JobList matches={visibleCompany} onPick={pick} />
           ) : companyJobs.length > 0 ? (
-            <p className="text-sm text-slate-400">目前篩選（適配／地區）沒有符合的公司職缺。</p>
+            <p className="text-sm text-slate-400">目前適配篩選沒有符合的公司職缺。</p>
           ) : (
             <Card className="p-2">
               <EmptyState icon={Building2} title="指定公司目前查無相關開缺"

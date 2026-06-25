@@ -58,6 +58,21 @@ def test_source_104_paginates_and_dedups(monkeypatch):
     assert urls == ["https://x/1", "https://x/2", "https://x/3"]  # 去重後 3 筆
 
 
+def test_source_104_area_param(monkeypatch):
+    # 帶 area → URL 應出現 &area=（逗號串接、URL 編碼），不帶則沒有
+    seen = {}
+
+    def fake_get(url, **k):
+        seen["url"] = url
+        return FakeResp(json_data={"data": []})
+
+    monkeypatch.setattr(source_104, "http_get", fake_get)
+    source_104.search("AI", area=["6001001000", "6001016000"])
+    assert "&area=6001001000%2C6001016000" in seen["url"]  # 台北,高雄（%2C = 逗號）
+    source_104.search("AI")
+    assert "&area=" not in seen["url"]                       # 不限地區時不帶 area
+
+
 def test_source_104_pages_default_one(monkeypatch):
     # 預設 pages=1 只抓第一頁（維持舊行為）
     calls = []
@@ -222,8 +237,8 @@ def test_registry_search_all_aggregates(monkeypatch):
     from app.sources import registry
     from app.models import SearchResult
     monkeypatch.setattr(registry, "SEARCHABLE", {
-        "104": lambda kw, limit=15, pages=1: SearchResult(source="104"),
-        "yourator": lambda kw, limit=15, pages=1: SearchResult(source="yourator"),
+        "104": lambda kw, limit=15, pages=1, area=None: SearchResult(source="104"),
+        "yourator": lambda kw, limit=15, pages=1, area=None: SearchResult(source="yourator"),
     })
     results = registry.search_all("AI")
     assert [r.source for r in results] == ["104", "yourator"]
@@ -235,13 +250,15 @@ def test_registry_search_all_passes_pages(monkeypatch):
     from app.models import SearchResult
     seen = {}
 
-    def fake(kw, limit=15, pages=1):
+    def fake(kw, limit=15, pages=1, area=None):
         seen["pages"] = pages
+        seen["area"] = area
         return SearchResult(source="104")
 
     monkeypatch.setattr(registry, "SEARCHABLE", {"104": fake})
-    registry.search_all("AI", pages=3)
+    registry.search_all("AI", pages=3, area=["6001001000"])
     assert seen["pages"] == 3
+    assert seen["area"] == ["6001001000"]          # area 也應下傳給來源
 
 
 def test_linkedin_search_url():
@@ -249,3 +266,21 @@ def test_linkedin_search_url():
     url = linkedin_search_url("AI 工程師")
     assert url.startswith("https://www.linkedin.com/jobs/search/")
     assert "Taiwan" in url
+
+
+def test_regions_parse_and_codes():
+    from app.sources import regions
+    keys = regions.parse_keys("台北市, 高雄市,不存在的縣,台北市")  # 去空白、丟未知、去重
+    assert keys == ["台北市", "高雄市"]
+    assert regions.area_codes(keys) == ["6001001000", "6001016000"]
+    assert regions.area_codes([]) == []
+
+
+def test_regions_match_location():
+    from app.sources import regions
+    keys = ["台北市"]
+    assert regions.match_location("台北市信義區", keys) is True
+    assert regions.match_location("Taipei, Taiwan", keys) is True   # 英文別名
+    assert regions.match_location("台中市西屯區", keys) is False     # 外地濾掉
+    assert regions.match_location(None, keys) is True               # 缺地點寬鬆保留
+    assert regions.match_location("台中市", []) is True             # 不限地區一律 True

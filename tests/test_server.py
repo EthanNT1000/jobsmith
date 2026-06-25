@@ -226,7 +226,7 @@ def test_jobs_auto_falls_back_when_all_blocked(monkeypatch):
     monkeypatch.setattr(server_mod, "derive_queries", lambda profile: ["AI 工程師"])
     # 所有來源都被擋 → 無 job
     monkeypatch.setattr(server_mod, "search_all",
-                        lambda q, limit=10, pages=1: [SearchResult(source="104", blocked=True)])
+                        lambda q, limit=10, pages=1, area=None: [SearchResult(source="104", blocked=True)])
     captured = {}
 
     def fake_rank(profile, jobs, top_k=12):
@@ -251,7 +251,7 @@ def test_jobs_auto_emits_profile_event(monkeypatch):
                                              skills=["Python"]))
     monkeypatch.setattr(server_mod, "derive_queries", lambda profile: ["AI 工程師"])
     monkeypatch.setattr(server_mod, "search_all",
-                        lambda q, limit=10, pages=1: [SearchResult(source="104", jobs=[
+                        lambda q, limit=10, pages=1, area=None: [SearchResult(source="104", jobs=[
                             JobPosting(source="104", title="AI", company="C", url="u1")])])
     monkeypatch.setattr(server_mod, "rank_jobs",
                         lambda profile, jobs, top_k=12: [JobMatch(job=jobs[0], fit_score=80)])
@@ -374,7 +374,7 @@ def test_jobs_auto_streams_ranked_jobs(monkeypatch):
                         lambda text: Profile(name="王", summary="後端", raw_text=text))
     monkeypatch.setattr(server_mod, "derive_queries", lambda profile: ["AI 工程師"])
     monkeypatch.setattr(server_mod, "search_all",
-                        lambda q, limit=10, pages=1: [SearchResult(source="104", jobs=[
+                        lambda q, limit=10, pages=1, area=None: [SearchResult(source="104", jobs=[
                             JobPosting(source="104", title="AI 工程師", company="某公司", url="u1")])])
     monkeypatch.setattr(server_mod, "rank_jobs",
                         lambda profile, jobs, top_k=12: [JobMatch(job=jobs[0], fit_score=88, reason="合適")])
@@ -407,7 +407,7 @@ def test_jobs_auto_passes_pages_to_search(monkeypatch):
     monkeypatch.setattr(server_mod, "rank_jobs", lambda profile, jobs, top_k=None: [])
     captured = {}
 
-    def fake_search(q, limit=15, pages=1):
+    def fake_search(q, limit=15, pages=1, area=None):
         captured["pages"] = pages
         return [SearchResult(source="104", jobs=[])]
     monkeypatch.setattr(server_mod, "search_all", fake_search)
@@ -419,6 +419,34 @@ def test_jobs_auto_passes_pages_to_search(monkeypatch):
     assert captured["pages"] == 5                       # 上界夾住
     client.post("/api/jobs/auto", data={"resume_text": "x", "pages": "0"})
     assert captured["pages"] == 1                       # 下界夾住
+
+
+def test_jobs_auto_region_filters_uniformly(monkeypatch):
+    """選地區：104 收到 area 代碼（來源端篩）；非-104 來源的外地職缺由結果端 location 過濾掉。"""
+    from app.models import Profile, JobPosting, JobMatch, SearchResult
+    monkeypatch.setattr(server_mod, "structure_profile",
+                        lambda text: Profile(name="王", summary="後端", raw_text=text))
+    monkeypatch.setattr(server_mod, "derive_queries", lambda profile: ["AI"])
+    captured = {}
+
+    def fake_search(q, limit=15, pages=1, area=None):
+        captured["area"] = area
+        return [
+            SearchResult(source="104", jobs=[  # 104：信任來源端 area，不再結果端過濾
+                JobPosting(source="104", title="台北職缺", company="A", url="u104", location="台北市信義區")]),
+            SearchResult(source="cake", jobs=[  # cake：外地者應被結果端濾掉
+                JobPosting(source="cake", title="台北遠端", company="B", url="ucake1", location="台北市"),
+                JobPosting(source="cake", title="台中現場", company="C", url="ucake2", location="台中市西屯區")]),
+        ]
+    monkeypatch.setattr(server_mod, "search_all", fake_search)
+    monkeypatch.setattr(server_mod, "rank_jobs",
+                        lambda profile, jobs, top_k=None: [JobMatch(job=j, fit_score=70) for j in jobs])
+    client = TestClient(server_mod.app)
+    r = client.post("/api/jobs/auto", data={"resume_text": "x", "region": "台北市"})
+    events = _parse_sse(r.text)
+    assert captured["area"] == ["6001001000"]          # 台北市的 104 代碼
+    titles = {m["job"]["title"] for e in events if e["type"] == "ranked_batch" for m in e["data"]}
+    assert titles == {"台北職缺", "台北遠端"}            # 台中現場（非-104 外地）被濾掉
 
 
 def test_pipeline_chat_resume_applies_update(monkeypatch):
@@ -465,7 +493,7 @@ def test_jobs_auto_lists_company_jobs_in_separate_event(monkeypatch):
                         lambda text: Profile(name="王", summary="後端", raw_text=text))
     monkeypatch.setattr(server_mod, "derive_queries", lambda profile: ["AI 工程師"])
     monkeypatch.setattr(server_mod, "search_all",
-                        lambda q, limit=15, pages=1: [SearchResult(source="104", jobs=[
+                        lambda q, limit=15, pages=1, area=None: [SearchResult(source="104", jobs=[
                             JobPosting(source="104", title="AI 工程師", company="某公司", url="u1")])])
     captured = {}
 
@@ -495,7 +523,7 @@ def test_jobs_auto_without_companies_skips_company_lookup(monkeypatch):
                         lambda text: Profile(name="王", summary="後端", raw_text=text))
     monkeypatch.setattr(server_mod, "derive_queries", lambda profile: ["AI 工程師"])
     monkeypatch.setattr(server_mod, "search_all",
-                        lambda q, limit=15, pages=1: [SearchResult(source="104", jobs=[
+                        lambda q, limit=15, pages=1, area=None: [SearchResult(source="104", jobs=[
                             JobPosting(source="104", title="AI 工程師", company="某公司", url="u1")])])
     called = {"n": 0}
 

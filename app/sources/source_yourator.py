@@ -11,8 +11,12 @@ SEARCHABLE = True
 _API = "https://www.yourator.co/api/v4/jobs?term[]={kw}&page={page}"
 
 
-def search(keywords: str, limit: int = 15, pages: int = 1) -> SearchResult:
-    """搜尋 Yourator；pages>1 時逐頁抓取（API 吃 page 參數）並跨頁去重。"""
+def search(keywords: str, limit: int = 15, pages: int = 1,
+           area: list[str] | None = None) -> SearchResult:
+    """搜尋 Yourator；pages>1 時逐頁抓取（API 吃 page 參數）並跨頁去重。
+
+    area：保留參數，本來源不支援來源端地區篩選（地區由結果端 location 過濾處理）。
+    """
     jobs: list[JobPosting] = []
     seen: set[str] = set()
     for page in range(1, max(1, pages) + 1):
