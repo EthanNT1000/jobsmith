@@ -28,7 +28,7 @@ from app.store import history as _history
 from app.store import memory as _memory
 from app.store import searches as _searches
 
-app = FastAPI(title="台灣 AI 求職 Co-pilot")
+app = FastAPI(title="Jobsmith")
 
 # 單一圖實例：/run 與 /resume 共用同一個 MemorySaver（per-process）。
 GRAPH = build_graph()
@@ -374,7 +374,8 @@ def _cli_version(name: str) -> str:
     if not exe:
         return ""
     try:
-        r = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=8)
+        r = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=8,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         lines = (r.stdout or r.stderr or "").strip().splitlines()
         return lines[0][:80] if lines else ""
     except Exception:

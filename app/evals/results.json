@@ -1,0 +1,134 @@
+{
+  "summary": {
+    "n": 5,
+    "pass_rate_off": 60.0,
+    "pass_rate_on": 100.0,
+    "mean_off": 85.6,
+    "mean_on": 87.5,
+    "mean_lift": 1.9,
+    "pass_rate_lift": 40.0
+  },
+  "rows": [
+    {
+      "name": "llm_app_engineer",
+      "off": {
+        "resume_score": 87,
+        "cover_letter_score": 86,
+        "interview_score": 90,
+        "overall_pass": true,
+        "per_doc": {},
+        "feedback": []
+      },
+      "on": {
+        "resume_score": 87,
+        "cover_letter_score": 85,
+        "interview_score": 90,
+        "overall_pass": true,
+        "per_doc": {},
+        "feedback": []
+      }
+    },
+    {
+      "name": "ml_engineer_nlp",
+      "off": {
+        "resume_score": 89,
+        "cover_letter_score": 86,
+        "interview_score": 91,
+        "overall_pass": true,
+        "per_doc": {},
+        "feedback": []
+      },
+      "on": {
+        "resume_score": 88,
+        "cover_letter_score": 85,
+        "interview_score": 92,
+        "overall_pass": true,
+        "per_doc": {},
+        "feedback": []
+      }
+    },
+    {
+      "name": "agent_engineer",
+      "off": {
+        "resume_score": 88,
+        "cover_letter_score": 80,
+        "interview_score": 90,
+        "overall_pass": false,
+        "per_doc": {
+          "cover_letter": [
+            "移除或軟化未經證實的公司事實：正文以確定語氣寫「未來智能成立於 2024 年」，但 company_facts_used 自承這只是「最接近的登記實體（未來無限智能有限公司）」，且面試準備的 cautions 也明列「未來智能」與「未來無限智能有限公司」是否為同一實體尚未確認。在求職信把推測的登記資訊當作既定事實，一旦有誤會嚴重傷害可信度。請改為不綁定具體年份/實體的軟性表述（例如「據我了解貴司為近年成立、正快速定義產品的新創」），或完全移除年份宣稱。",
+            "重寫「為何選擇未來智能」段落的立論基礎：目前該段依賴推定的『2024 成立』與『10 人以下規模』來鋪陳，等於把推測當論據。請改以職缺明確點名的需求（LangGraph 多 agent 編排、工具呼叫與評估、Agent 系統落地上線）作為契合點，論述為何你的實作經驗正好對應這些被白紙黑字寫出的需求，而非對應你猜測的公司階段。",
+            "消除與履歷的語氣不一致：求職信寫「熟悉從 POC 原型到上線服務的完整工程流程，包含…服務部署」，但客製履歷的 notes 自承『落地上線』實績較薄、目前以 POC 為主。兩份文件對照時會露出落差。請把這句調整成與履歷一致的誠實定位，例如強調已具備可部署化的後端工程基礎（FastAPI、async、API schema）與正在把 POC 推進到可部署的具體作法，而非宣稱已熟悉完整上線流程。",
+            "為避免空泛，請在『多 Agent 編排』段落補上一個與履歷一致、可被面試追問的具體量化錨點（例如反思迴圈使品質分數或一致性的提升、early-stop 帶來的 token 下降幅度），但須確保該數字與履歷及面試 sample_answers 中引用的數據一致，不得另創新的、彼此矛盾的指標。"
+          ]
+        },
+        "feedback": [
+          "[求職信] 移除或軟化未經證實的公司事實：正文以確定語氣寫「未來智能成立於 2024 年」，但 company_facts_used 自承這只是「最接近的登記實體（未來無限智能有限公司）」，且面試準備的 cautions 也明列「未來智能」與「未來無限智能有限公司」是否為同一實體尚未確認。在求職信把推測的登記資訊當作既定事實，一旦有誤會嚴重傷害可信度。請改為不綁定具體年份/實體的軟性表述（例如「據我了解貴司為近年成立、正快速定義產品的新創」），或完全移除年份宣稱。",
+          "[求職信] 重寫「為何選擇未來智能」段落的立論基礎：目前該段依賴推定的『2024 成立』與『10 人以下規模』來鋪陳，等於把推測當論據。請改以職缺明確點名的需求（LangGraph 多 agent 編排、工具呼叫與評估、Agent 系統落地上線）作為契合點，論述為何你的實作經驗正好對應這些被白紙黑字寫出的需求，而非對應你猜測的公司階段。",
+          "[求職信] 消除與履歷的語氣不一致：求職信寫「熟悉從 POC 原型到上線服務的完整工程流程，包含…服務部署」，但客製履歷的 notes 自承『落地上線』實績較薄、目前以 POC 為主。兩份文件對照時會露出落差。請把這句調整成與履歷一致的誠實定位，例如強調已具備可部署化的後端工程基礎（FastAPI、async、API schema）與正在把 POC 推進到可部署的具體作法，而非宣稱已熟悉完整上線流程。",
+          "[求職信] 為避免空泛，請在『多 Agent 編排』段落補上一個與履歷一致、可被面試追問的具體量化錨點（例如反思迴圈使品質分數或一致性的提升、early-stop 帶來的 token 下降幅度），但須確保該數字與履歷及面試 sample_answers 中引用的數據一致，不得另創新的、彼此矛盾的指標。"
+        ]
+      },
+      "on": {
+        "resume_score": 90,
+        "cover_letter_score": 86,
+        "interview_score": 89,
+        "overall_pass": true,
+        "per_doc": {},
+        "feedback": []
+      }
+    },
+    {
+      "name": "data_engineer_ml",
+      "off": {
+        "resume_score": 84,
+        "cover_letter_score": 85,
+        "interview_score": 89,
+        "overall_pass": true,
+        "per_doc": {},
+        "feedback": []
+      },
+      "on": {
+        "resume_score": 83,
+        "cover_letter_score": 84,
+        "interview_score": 91,
+        "overall_pass": true,
+        "per_doc": {},
+        "feedback": []
+      }
+    },
+    {
+      "name": "senior_llm_platform",
+      "off": {
+        "resume_score": 88,
+        "cover_letter_score": 62,
+        "interview_score": 89,
+        "overall_pass": false,
+        "per_doc": {
+          "cover_letter": [
+            "捏造經歷（致命，必改）：第六段「加分項目方面，我亦有 Multi-agent 架構設計與評估框架導入的實際專案」與履歷自相矛盾——履歷已明確將 Multi-agent 列入 ats_keywords_missing 並註記「未見於提供的背景資料」。請刪除「Multi-agent 架構設計…的實際專案」這項不實宣稱。",
+            "改寫為誠實且可信的語氣：保留真實成果「評估框架（RAGAS 離線評估流程）」，並將 Multi-agent 改成興趣／可遷移表述，例如「對 Multi-agent 編排有高度興趣，可由現有 RAG pipeline 與多服務協作經驗自然延伸」，不可宣稱為既有實績。",
+            "三份文件口徑一致：全信不得出現任何履歷未支持的經歷；確保履歷、求職信、面試對 Multi-agent 的說法統一為『加分項待補』而非『已具備』。",
+            "公司事實查證：信中「鴻海富士康集團旗下、港交所掛牌（HK.1037）、智慧製造／工業4.0、設備自動化＋資源平台化＋系統智能化」等屬高度具體的對外宣稱，請再次與可靠來源核實；若無法確認，改為較保守、不綁定具體股權比例與股票代號的措辭，避免面試時因事實誤差失分。",
+            "收斂對『智慧製造』場景的過度貼合：目前多段落把公司核心預設為製造業，若該前提未經證實，建議僅保留一段做價值連結，其餘聚焦在可遷移的 LLM 推論平台／RAG／成本延遲優化／可觀測性價值，降低押錯產業方向的風險。"
+          ]
+        },
+        "feedback": [
+          "[求職信] 捏造經歷（致命，必改）：第六段「加分項目方面，我亦有 Multi-agent 架構設計與評估框架導入的實際專案」與履歷自相矛盾——履歷已明確將 Multi-agent 列入 ats_keywords_missing 並註記「未見於提供的背景資料」。請刪除「Multi-agent 架構設計…的實際專案」這項不實宣稱。",
+          "[求職信] 改寫為誠實且可信的語氣：保留真實成果「評估框架（RAGAS 離線評估流程）」，並將 Multi-agent 改成興趣／可遷移表述，例如「對 Multi-agent 編排有高度興趣，可由現有 RAG pipeline 與多服務協作經驗自然延伸」，不可宣稱為既有實績。",
+          "[求職信] 三份文件口徑一致：全信不得出現任何履歷未支持的經歷；確保履歷、求職信、面試對 Multi-agent 的說法統一為『加分項待補』而非『已具備』。",
+          "[求職信] 公司事實查證：信中「鴻海富士康集團旗下、港交所掛牌（HK.1037）、智慧製造／工業4.0、設備自動化＋資源平台化＋系統智能化」等屬高度具體的對外宣稱，請再次與可靠來源核實；若無法確認，改為較保守、不綁定具體股權比例與股票代號的措辭，避免面試時因事實誤差失分。",
+          "[求職信] 收斂對『智慧製造』場景的過度貼合：目前多段落把公司核心預設為製造業，若該前提未經證實，建議僅保留一段做價值連結，其餘聚焦在可遷移的 LLM 推論平台／RAG／成本延遲優化／可觀測性價值，降低押錯產業方向的風險。"
+        ]
+      },
+      "on": {
+        "resume_score": 90,
+        "cover_letter_score": 87,
+        "interview_score": 85,
+        "overall_pass": true,
+        "per_doc": {},
+        "feedback": []
+      }
+    }
+  ]
+}

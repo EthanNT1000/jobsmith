@@ -12,8 +12,13 @@ frontend/dist/
 data/checkpoints.sqlite*
 data/app.sqlite*
 
+# PyInstaller 打包輸出（exe 很大，不進版控；發佈走 GitHub Release）
+/build/
+/dist/
+
 # 參考用截圖（非產品檔）
 opendesign.png
+地區.png
 
 # 個人資料 / 個人截圖（勿進版控）
 /resume_zh.pdf

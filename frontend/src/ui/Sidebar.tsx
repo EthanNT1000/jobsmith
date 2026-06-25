@@ -33,7 +33,7 @@ export function Sidebar<T extends string>(
       <div className="flex items-center gap-2 px-3 md:px-4 h-16 border-b border-slate-100">
         <Logomark size={28} />
         <div className="hidden md:block font-display font-bold text-base leading-none">
-          <span className="text-slate-900">Job</span><span className="text-brand-600">Copilot</span>
+          <span className="text-slate-900">Job</span><span className="text-brand-600">smith</span>
         </div>
       </div>
       <nav className="flex-1 py-3 overflow-y-auto">{items.map(renderItem)}</nav>

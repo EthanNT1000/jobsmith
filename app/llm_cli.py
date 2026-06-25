@@ -22,6 +22,10 @@ from pydantic import BaseModel, ValidationError
 _MAX_TRIES = 3
 _TIMEOUT = 300
 
+# Windows：呼叫 CLI 子程序時不要彈出 console 視窗（視窗版 app 否則會一直閃黑窗）。
+# 非 Windows 取 0（無作用）。
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 
 def _messages_to_prompt(messages) -> tuple[str, str]:
     """把 [(role, content), ...] 拆成 (system, human) 兩段合併字串。"""
@@ -134,7 +138,7 @@ def _run_claude(prompt: str, model: str, allowed_tools: list[str] | None = None,
         args += ["--allowedTools", *allowed_tools]
     proc = subprocess.run(
         args, input="", capture_output=True, text=True, encoding="utf-8",
-        env=env, timeout=timeout,
+        env=env, timeout=timeout, creationflags=_NO_WINDOW,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"claude CLI 失敗（rc={proc.returncode}）：{(proc.stderr or '')[:300]}")
@@ -221,7 +225,7 @@ def _run_codex(prompt: str, timeout: int = _TIMEOUT, extra_args: list[str] | Non
                 "-o", str(out_file), *(extra_args or []), prompt]
         proc = subprocess.run(
             args, input="", capture_output=True, text=True, encoding="utf-8",
-            env=env, timeout=timeout,
+            env=env, timeout=timeout, creationflags=_NO_WINDOW,
         )
         if proc.returncode != 0:
             raise RuntimeError(f"codex CLI 失敗（rc={proc.returncode}）：{(proc.stderr or '')[:300]}")
