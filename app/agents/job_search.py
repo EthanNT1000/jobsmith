@@ -90,7 +90,8 @@ def rank_jobs(profile: Profile, jobs: list[JobPosting], top_k: int | None = None
                                     matched=r.matched, gaps=r.gaps, reason=r.reason))
         else:
             matches.append(JobMatch(job=job, fit_score=0, reason="未評分"))
-    matches.sort(key=lambda m: m.fit_score, reverse=True)
+    # 穩定排序：同分時以 url 決定先後，讓同一批職缺的顯示順序可重現（不隨並行/批次到達順序變動）。
+    matches.sort(key=lambda m: (-m.fit_score, m.job.url or (m.job.title + m.job.company)))
     # 超出排序上限的職缺仍保留（附在後面、未評分），確保「不設限」顯示全部
     matches.extend(JobMatch(job=j, fit_score=0, reason="未評分") for j in overflow)
     return matches if top_k is None else matches[:top_k]

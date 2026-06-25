@@ -21,28 +21,17 @@
 
 ## 快速開始
 
-> **環境需求：** Python 3.11+、Node.js 18+，以及下列擇一：PATH 上已登入的 **Claude Code**（`claude`）／ **Codex CLI**（`codex`），或一組 **Anthropic API key**。
+> **環境需求：** Python 3.11+、Node.js 18+，以及 PATH 上已登入的 **Claude Code**（`claude`）或 **Codex CLI**（`codex`）。
 
 ```bash
 git clone https://github.com/kevin333353/taiwan-ai-job-copilot.git
 cd taiwan-ai-job-copilot
 
-# 一鍵安裝：venv + 後端相依 + 前端安裝與建置
-setup.bat            # Windows
+setup.bat            # Windows  — 一鍵安裝（venv + 相依 + 前端建置）
 # ./setup.sh         # macOS / Linux / Git Bash
 
-# 啟動
-desktop.bat          # 原生桌面視窗（推薦）
-# run.bat            # 網頁版 → http://localhost:8000
-```
-
-`setup.bat` / `setup.sh` 會一次做完所有事（建 venv、`pip install`、`npm install`、`npm run build`）——**不必自己分別開前後端安裝與啟動**。
-
-要改用 **API key** 後端（而非 CLI 訂閱）？把 `.env.example` 複製成 `.env` 並設定：
-
-```env
-LLM_BACKEND=anthropic
-ANTHROPIC_API_KEY=sk-ant-...
+desktop.bat          # 以原生桌面視窗啟動（推薦）
+# run.bat            # 或網頁版 → http://localhost:8000
 ```
 
 ### 執行模式
@@ -53,7 +42,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 | **網頁版**     | `run.bat`（或 `python -m uvicorn app.server:app --port 8000`） | 開 <http://localhost:8000>。               |
 | **CLI（單一 JD）** | `python -m app.cli data/demo_jobs/ai_engineer.txt`        | 無介面、單一 JD 跑一次。                   |
 
-> 後端切換：開場引導畫面、右上角選單，或 `.env` 的 `LLM_BACKEND` 皆可。
+> 後端切換：開場引導畫面或右上角選單皆可隨時切換。
 
 ## 目錄
 
@@ -61,6 +50,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 - [功能](#功能)
 - [LLM 後端](#llm-後端)
 - [系統架構](#系統架構)
+- [成效評測](#成效評測)
 - [技術棧](#技術棧)
 - [專案結構](#專案結構)
 - [測試](#測試)
@@ -81,13 +71,14 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ## LLM 後端
 
+本專案以你的**本機 CLI 訂閱**運作——免 API key、不按 token 計費：
+
 | 後端         | 認證方式                  | 說明                                       |
 | ------------ | ------------------------- | ------------------------------------------ |
 | `claude_cli` | Claude Code 訂閱          | **預設。** 免 API key；會移除 `ANTHROPIC_*` 環境變數。 |
 | `codex_cli`  | Codex 訂閱                | 使用你設定的 Codex 模型。                  |
-| `anthropic`  | `ANTHROPIC_API_KEY`       | 可雲端部署；按量計費。                     |
 
-CLI 訂閱是在**本機**執行、綁定你機器上登入的 CLI——遠端伺服器無法使用別人本機的訂閱。若要做完全託管的雲端版，請改用 `anthropic` 後端。
+CLI 訂閱在**本機**執行、綁定你機器上登入的 CLI，履歷不會離開你的電腦。另有 API key 後端（`anthropic`）供自架或 CI 使用，但一般使用不需要。
 
 ## 系統架構
 
@@ -102,7 +93,7 @@ React SPA (Vite)  ──HTTP/SSE──►  FastAPI
                   │
                   ▼
           可切換的 LLM 後端
-          claude_cli · codex_cli · anthropic
+          claude_cli · codex_cli
 ```
 
 - 以 LangGraph `StateGraph` 編排各代理；`SqliteSaver` 保存 checkpoint，並以 `interrupt()` / `Command(resume=…)` 實作 human-in-the-loop 核可。
@@ -110,13 +101,27 @@ React SPA (Vite)  ──HTTP/SSE──►  FastAPI
 - 應用層 SQLite（與 LangGraph checkpoint 分開）存放投遞包歷史、使用者記憶與搜尋紀錄。
 - 模型自動分層：解析用 **haiku**、匹配／生成用 **sonnet**、深思（Critic/Supervisor）用 **opus**。
 
+## 成效評測
+
+Supervisor 反思迴圈（Critic → 重寫未過文件 → 再評）到底有沒有提升品質？用 5 組職缺／履歷的 golden set，分別在反思**關**（不重寫）與**開**兩種設定下跑，比較 Critic 分數：
+
+<!-- EVAL:START -->
+_執行 `python -m app.evals.harness` 產生下方數字。_
+<!-- EVAL:END -->
+
+```bash
+python -m app.evals.harness     # 對每個 golden 案例跑整張 graph，寫入 app/evals/results.json
+```
+
+彙整用的 `summarize()` 是純函式、有獨立單元測試，因此聚合邏輯不受（非確定性的）LLM 呼叫影響、可單獨驗證。
+
 ## 技術棧
 
 | 層級     | 技術                                                                     |
 | -------- | ------------------------------------------------------------------------ |
 | 後端     | Python、FastAPI、LangGraph、LangChain、Pydantic v2、SQLite、BeautifulSoup |
 | 前端     | React 19、TypeScript、Vite、Tailwind CSS、lucide-react                    |
-| LLM      | Claude Code CLI / Codex CLI（訂閱）· Anthropic API（金鑰）                |
+| LLM      | Claude Code CLI / Codex CLI（本機訂閱）                                   |
 | 桌面     | pywebview（在本機伺服器上開原生視窗）                                     |
 
 ## 專案結構

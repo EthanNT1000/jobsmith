@@ -50,4 +50,36 @@ GOLDEN: list[dict] = [
             preferred_roles=["AI Agent 工程師", "LLM 應用工程師"],
             raw_text="王宇婷｜AI agent 工程。LangGraph 多 agent + 評測。"),
     },
+    {
+        "name": "data_engineer_ml",
+        "jd_text": (
+            "資料工程師（ML 平台）\n公司：洞數據\n地點：台北市\n"
+            "需求：熟 Python 與 SQL、建置 ETL 與資料管線、Spark/Airflow、雲端（GCP/AWS）；"
+            "加分：支援 ML 特徵管線、BigQuery、資料品質監控。"
+        ),
+        "profile": Profile(
+            name="周建宏", summary="三年資料工程，建過批次與串流資料管線",
+            skills=["Python", "SQL", "Airflow", "Spark", "GCP", "BigQuery"],
+            experiences=["以 Airflow 排程每日 ETL，支撐 BI 與報表",
+                         "建置 Spark 串流管線處理事件資料"],
+            education="資工系學士", years_experience=3,
+            preferred_roles=["資料工程師", "ML 平台工程師"],
+            raw_text="周建宏｜資料工程師。ETL/Spark/Airflow 三年。"),
+    },
+    {
+        "name": "senior_llm_platform",
+        "jd_text": (
+            "資深 LLM 平台工程師\n公司：智匯雲\n地點：台北市（遠端友善）\n"
+            "需求：5 年以上後端、設計 LLM 推論服務與 RAG 平台、熟 Python/FastAPI 與 Kubernetes、"
+            "成本與延遲優化、可觀測性；加分：vector database、multi-agent、評估框架。"
+        ),
+        "profile": Profile(
+            name="許雅婷", summary="六年後端，近兩年帶 LLM 平台與 RAG 服務上線",
+            skills=["Python", "FastAPI", "Kubernetes", "RAG", "vector database", "MLOps"],
+            experiences=["設計多租戶 LLM 推論閘道，p95 延遲降 40%",
+                         "建置 RAG 平台與離線評估，導入成本/延遲儀表板"],
+            education="資工碩士", years_experience=6,
+            preferred_roles=["資深 LLM 工程師", "LLM 平台工程師"],
+            raw_text="許雅婷｜資深後端 / LLM 平台。RAG 服務與評估兩年。"),
+    },
 ]

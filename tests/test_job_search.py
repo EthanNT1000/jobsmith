@@ -37,6 +37,21 @@ def test_rank_jobs_empty_returns_empty():
     assert mod.rank_jobs(Profile(name="x", summary="y", raw_text="z"), []) == []
 
 
+def test_rank_jobs_stable_tiebreak_by_url(monkeypatch):
+    # 同分時以 url 決定先後 → 顯示順序可重現，不隨輸入/批次到達順序變動。
+    canned = mod._RankResult(rankings=[
+        mod._RankItem(index=0, fit_score=50, reason="r"),
+        mod._RankItem(index=1, fit_score=50, reason="r"),
+    ])
+    monkeypatch.setattr(mod, "get_llm", lambda tier, **k: FakeLLM(canned))
+    jobs = [  # 輸入先 zzz 後 aaa；同分 → 排序後 aaa 應在前
+        JobPosting(source="x", title="Z", company="c", url="https://x/zzz"),
+        JobPosting(source="x", title="A", company="c", url="https://x/aaa"),
+    ]
+    out = mod.rank_jobs(Profile(name="王", summary="x", raw_text="r"), jobs)
+    assert [m.job.url for m in out] == ["https://x/aaa", "https://x/zzz"]
+
+
 def _ranker(n):
     return FakeLLM(mod._RankResult(rankings=[
         mod._RankItem(index=i, fit_score=100 - i, reason="r") for i in range(n)

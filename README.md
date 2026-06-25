@@ -21,28 +21,17 @@ Powered by your local **Claude Code / Codex CLI** subscription — no API key re
 
 ## Quick Start
 
-> **Prerequisites:** Python 3.11+, Node.js 18+, and either a logged-in **Claude Code** (`claude`) / **Codex CLI** (`codex`) on your `PATH`, or an **Anthropic API key**.
+> **Prerequisites:** Python 3.11+, Node.js 18+, and a logged-in **Claude Code** (`claude`) or **Codex CLI** (`codex`) on your `PATH`.
 
 ```bash
 git clone https://github.com/kevin333353/taiwan-ai-job-copilot.git
 cd taiwan-ai-job-copilot
 
-# One-time setup: virtualenv + backend deps + frontend install & build
-setup.bat            # Windows
+setup.bat            # Windows  — one-time setup (venv + deps + frontend build)
 # ./setup.sh         # macOS / Linux / Git Bash
 
-# Launch
-desktop.bat          # native desktop window (recommended)
-# run.bat            # web mode → http://localhost:8000
-```
-
-`setup.bat` / `setup.sh` does everything (venv, `pip install`, `npm install`, `npm run build`) in one go — no need to start the front and back ends separately.
-
-Using the **API-key** backend instead of a CLI subscription? Copy `.env.example` to `.env` and set:
-
-```env
-LLM_BACKEND=anthropic
-ANTHROPIC_API_KEY=sk-ant-...
+desktop.bat          # launch as a native desktop window (recommended)
+# run.bat            # or web mode → http://localhost:8000
 ```
 
 ### Running modes
@@ -53,7 +42,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 | **Web**          | `run.bat` (or `python -m uvicorn app.server:app --port 8000`) | Open <http://localhost:8000>.                                     |
 | **CLI (one JD)** | `python -m app.cli data/demo_jobs/ai_engineer.txt`           | Headless single-JD run.                                            |
 
-> Switch the LLM backend from the onboarding screen, the top-right selector, or `LLM_BACKEND` in `.env`.
+> Switch backend anytime from the onboarding screen or the top-right selector.
 
 ## Table of Contents
 
@@ -61,6 +50,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 - [Features](#features)
 - [LLM Backends](#llm-backends)
 - [Architecture](#architecture)
+- [Evaluation](#evaluation)
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
 - [Testing](#testing)
@@ -81,13 +71,14 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ## LLM Backends
 
+The app runs on your **local CLI subscription** — no API key, no per-token cost:
+
 | Backend      | Auth                     | Notes                                              |
 | ------------ | ------------------------ | -------------------------------------------------- |
 | `claude_cli` | Claude Code subscription | **Default.** No API key; strips `ANTHROPIC_*` env. |
 | `codex_cli`  | Codex subscription       | Uses your configured Codex model.                  |
-| `anthropic`  | `ANTHROPIC_API_KEY`      | Cloud/deployable; pay-per-use.                     |
 
-CLI subscriptions run **locally** and bind to the logged-in CLI on your machine — a remote server cannot use someone else's local subscription. For a fully hosted deployment, use the `anthropic` backend.
+CLI subscriptions run **locally** and bind to the logged-in CLI on your machine, so your résumé never leaves your computer. An API-key backend (`anthropic`) also exists for self-hosting or CI, but isn't needed for normal use.
 
 ## Architecture
 
@@ -102,7 +93,7 @@ React SPA (Vite)  ──HTTP/SSE──►  FastAPI
                   │
                   ▼
           Pluggable LLM backend
-          claude_cli · codex_cli · anthropic
+          claude_cli · codex_cli
 ```
 
 - A LangGraph `StateGraph` orchestrates the agents; `SqliteSaver` persists checkpoints and powers the human-in-the-loop approval gate via `interrupt()` / `Command(resume=…)`.
@@ -110,13 +101,27 @@ React SPA (Vite)  ──HTTP/SSE──►  FastAPI
 - An application-level SQLite database (separate from the LangGraph checkpoint store) holds package history, user memory, and saved searches.
 - Models are tiered automatically: **haiku** for extraction, **sonnet** for matching/generation, **opus** for the Critic/Supervisor.
 
+## Evaluation
+
+Does the Supervisor reflection loop (Critic → revise un-passed documents → re-critique) actually improve output quality? A small golden set of 5 job/résumé pairs is run with reflection **off** (no revisions) and **on**, and the resulting Critic scores are compared:
+
+<!-- EVAL:START -->
+_Run `python -m app.evals.harness` to generate the numbers below._
+<!-- EVAL:END -->
+
+```bash
+python -m app.evals.harness     # runs the graph on each golden case, writes app/evals/results.json
+```
+
+The `summarize()` step is a pure function with its own unit tests, so the aggregation logic is verified independently of the (non-deterministic) LLM calls.
+
 ## Tech Stack
 
 | Layer    | Technologies                                                             |
 | -------- | ------------------------------------------------------------------------ |
 | Backend  | Python, FastAPI, LangGraph, LangChain, Pydantic v2, SQLite, BeautifulSoup |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS, lucide-react                    |
-| LLM      | Claude Code CLI / Codex CLI (subscription) · Anthropic API (key)          |
+| LLM      | Claude Code CLI / Codex CLI (local subscription)                         |
 | Desktop  | pywebview (native window over the local server)                          |
 
 ## Project Structure

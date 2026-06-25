@@ -22,7 +22,9 @@ type SearchAcc = {
   queries: string[]; sources: SourceStat[]; linkedin: string; fallback: boolean
   profile: UserProfile | null
 }
-const sortByFit = (arr: JobMatch[]) => [...arr].sort((a, b) => b.fit_score - a.fit_score)
+// 同分時以 url 決定先後，讓分批串流到達的順序不影響最終排序（可重現）。
+const sortByFit = (arr: JobMatch[]) =>
+  [...arr].sort((a, b) => b.fit_score - a.fit_score || (a.job.url < b.job.url ? -1 : a.job.url > b.job.url ? 1 : 0))
 
 function mergeSource(arr: SourceStat[], ev: { source: string; count: number; blocked: boolean }): SourceStat[] {
   const idx = arr.findIndex((x) => x.source === ev.source)
