@@ -8,16 +8,18 @@ import { Sparkles, ExternalLink, ChevronLeft, ChevronRight } from "../../ui/icon
 
 const PAGE_SIZE = 8
 
-function fitGradient(s: number) {
-  return s >= 80 ? "from-emerald-500 to-emerald-600"
-    : s >= 60 ? "from-amber-500 to-amber-600"
-      : "from-slate-400 to-slate-500"
+// 適配以高/中/低色帶呈現（內部仍用 fit_score 排序/篩選）；避免與投遞包的「匹配評分」數字打架。
+function fitBand(s: number) {
+  return s >= 80 ? { label: "高", cls: "from-emerald-500 to-emerald-600" }
+    : s >= 60 ? { label: "中", cls: "from-amber-500 to-amber-600" }
+      : { label: "低", cls: "from-slate-400 to-slate-500" }
 }
 
 function FitBadge({ score }: { score: number }) {
+  const b = fitBand(score)
   return (
-    <div className={`shrink-0 w-14 h-14 rounded-xl bg-gradient-to-br ${fitGradient(score)} text-white grid place-items-center text-center`}>
-      <div className="text-lg font-bold leading-none">{score}</div>
+    <div className={`shrink-0 w-14 h-14 rounded-xl bg-gradient-to-br ${b.cls} text-white grid place-items-center text-center`}>
+      <div className="text-xl font-bold leading-none">{b.label}</div>
       <div className="text-[9px] opacity-85 mt-0.5">適配</div>
     </div>
   )

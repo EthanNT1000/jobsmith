@@ -1,19 +1,18 @@
 import { useEffect, useState } from "react"
 import type { MouseEvent } from "react"
-import type { UserProfile, JobMatch, SkillGapReport } from "../types"
+import type { UserProfile, JobMatch } from "../types"
 import { resolveJd } from "../lib/resolveJd"
 import { JobList } from "../components/jobs/JobList"
 import { Card } from "../ui/Card"
-import { Badge } from "../ui/Badge"
 import { EmptyState } from "../ui/EmptyState"
-import { Search, Trash2, ArrowLeft, Building2, Target } from "../ui/icons"
+import { Search, Trash2, ArrowLeft, Building2 } from "../ui/icons"
 
 interface SearchSummary {
   id: number; created_at: string; label: string; ai_count: number; company_count: number
 }
 interface SearchDetail {
   id: number; label: string; created_at: string; profile?: UserProfile | null;
-  payload: { jobs?: JobMatch[]; companyJobs?: JobMatch[]; skillGap?: SkillGapReport }
+  payload: { jobs?: JobMatch[]; companyJobs?: JobMatch[] }
 }
 
 function fmtDate(iso: string) {
@@ -56,7 +55,6 @@ export function SearchHistoryView(
     const profile: UserProfile | null = detail.profile || null
     const aiJobs: JobMatch[] = p.jobs || []
     const companyJobs: JobMatch[] = p.companyJobs || []
-    const gap = p.skillGap
     const pick = async (m: JobMatch) => onPick(await resolveJd(m.job), profile)
     return (
       <div>
@@ -66,19 +64,6 @@ export function SearchHistoryView(
         </button>
         <h2 className="font-semibold mb-1">{detail.label}</h2>
         <p className="text-sm text-slate-500 mb-4">{fmtDate(detail.created_at)}</p>
-
-        {gap && gap.your_gaps?.length > 0 && (
-          <Card className="p-4 mb-4">
-            <h3 className="font-bold mb-2 flex items-center gap-2 text-slate-900">
-              <Target className="w-4 h-4 text-brand-600" />當時的技能缺口
-            </h3>
-            <div className="flex flex-wrap gap-1.5">
-              {gap.your_gaps.slice(0, 12).map((g: { skill: string; count: number }, i: number) => (
-                <Badge key={i} tone="rose">{g.skill} ×{g.count}</Badge>
-              ))}
-            </div>
-          </Card>
-        )}
 
         {aiJobs.length > 0 && (
           <>

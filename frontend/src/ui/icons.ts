@@ -44,5 +44,6 @@ export {
   ChevronRight,
   Trash2,
   Layers,
+  MapPin,
   X,
 } from "lucide-react"

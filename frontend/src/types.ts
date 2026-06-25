@@ -92,7 +92,6 @@ export type JobsAutoEvent =
   | { type: "rank_start"; total: number; fallback: boolean }
   | { type: "ranked_batch"; data: JobMatch[] }
   | { type: "company_jobs"; data: JobMatch[] }
-  | { type: "skill_gap"; data: SkillGapReport }
   | { type: "linkedin"; url: string }
   | { type: "error"; message: string }
   | { type: "done" }

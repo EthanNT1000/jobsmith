@@ -252,14 +252,6 @@ def jobs_auto(
             for batch in _rank_in_batches(profile, resume_jobs):
                 matches.extend(batch)
                 yield _sse({"type": "ranked_batch", "data": [m.model_dump() for m in batch]})
-            from app.agents.skill_gap import analyze_skill_gap
-            # 技能缺口只看「與履歷相關」的高適配職缺，避免行銷/業務等無關職缺污染缺口清單。
-            relevant_jobs = [m.job for m in matches if m.fit_score >= 50]
-            if len(relevant_jobs) < 5:
-                relevant_jobs = [m.job for m in sorted(matches, key=lambda x: -x.fit_score)[:15]]
-            gap = analyze_skill_gap(profile, relevant_jobs)
-            if gap.top_demand:
-                yield _sse({"type": "skill_gap", "data": gap.model_dump()})
             yield _sse({"type": "linkedin", "url": linkedin_search_url(queries[0] if queries else "")})
 
             # ② 使用者指定的公司開缺：與 AI 搜尋『分開』收集、分開排序、分開顯示，

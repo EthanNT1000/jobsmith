@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import type { ChangeEvent, KeyboardEvent as ReactKeyboardEvent } from "react"
-import type { JobMatch, UserProfile, SkillGapReport, JobsAutoEvent } from "../types"
+import type { JobMatch, UserProfile, JobsAutoEvent } from "../types"
 import { readSSE } from "../sse"
 import { SAMPLE_RESUME } from "../sampleResume"
 import { resolveJd } from "../lib/resolveJd"
@@ -11,20 +11,43 @@ import { Button } from "../ui/Button"
 import { Badge } from "../ui/Badge"
 import { Skeleton } from "../ui/Skeleton"
 import { EmptyState } from "../ui/EmptyState"
-import { Search, Upload, Loader2, ExternalLink, AlertTriangle, CheckCircle2, XCircle, Target, Building2, Layers, X } from "../ui/icons"
+import { Search, Upload, Loader2, ExternalLink, AlertTriangle, CheckCircle2, XCircle, Building2, Layers, MapPin, X } from "../ui/icons"
 
 const SNAP_KEY = "copilot.jobsearch.v1"  // 上次搜尋結果快取（重新整理/重開沿用）
 
 type SourceStat = { source: string; count: number; blocked: boolean }
 // 串流累積容器（完成後整包存進搜尋紀錄）；state 更新非同步，存檔讀這裡的即時值。
 type SearchAcc = {
-  jobs: JobMatch[]; companyJobs: JobMatch[]; skillGap: SkillGapReport | null
+  jobs: JobMatch[]; companyJobs: JobMatch[]
   queries: string[]; sources: SourceStat[]; linkedin: string; fallback: boolean
   profile: UserProfile | null
 }
 // 同分時以 url 決定先後，讓分批串流到達的順序不影響最終排序（可重現）。
 const sortByFit = (arr: JobMatch[]) =>
   [...arr].sort((a, b) => b.fit_score - a.fit_score || (a.job.url < b.job.url ? -1 : a.job.url > b.job.url ? 1 : 0))
+
+// 適配色帶分段篩選（內部仍用 fit_score）：全部 / 中以上(≥60) / 高(≥80)。
+const FIT_BANDS = [{ v: 0, l: "全部" }, { v: 60, l: "中以上" }, { v: 80, l: "高" }]
+
+// 地區篩選（依職缺 location 子字串比對；含常見中英別名）。
+const REGIONS: { key: string; aliases: string[] }[] = [
+  { key: "台北", aliases: ["台北", "臺北", "taipei"] },
+  { key: "新北", aliases: ["新北", "new taipei"] },
+  { key: "桃園", aliases: ["桃園", "taoyuan"] },
+  { key: "新竹", aliases: ["新竹", "hsinchu"] },
+  { key: "台中", aliases: ["台中", "臺中", "taichung"] },
+  { key: "台南", aliases: ["台南", "臺南", "tainan"] },
+  { key: "高雄", aliases: ["高雄", "kaohsiung"] },
+  { key: "遠端", aliases: ["遠端", "remote", "在家"] },
+]
+function matchRegion(loc: string | null | undefined, selected: string[]): boolean {
+  if (!selected.length) return true
+  const l = (loc || "").toLowerCase()
+  return selected.some((k) => {
+    const r = REGIONS.find((x) => x.key === k)
+    return r ? r.aliases.some((a) => l.includes(a.toLowerCase())) : false
+  })
+}
 
 function mergeSource(arr: SourceStat[], ev: { source: string; count: number; blocked: boolean }): SourceStat[] {
   const idx = arr.findIndex((x) => x.source === ev.source)
@@ -47,13 +70,13 @@ export function JobSearchView(
   const [jobs, setJobs] = useState<JobMatch[]>([])
   const [companyJobs, setCompanyJobs] = useState<JobMatch[]>([])
   const [rankTotal, setRankTotal] = useState(0)
-  const [minFit, setMinFit] = useState(0)
+  const [minFit, setMinFit] = useState(0)            // 適配色帶門檻（0/60/80）
+  const [regions, setRegions] = useState<string[]>([])  // 地區篩選（空 = 全部）
   const [linkedin, setLinkedin] = useState("")
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [blockedNote, setBlockedNote] = useState("")
   const [fallback, setFallback] = useState(false)
   const [error, setError] = useState("")
-  const [skillGap, setSkillGap] = useState<SkillGapReport | null>(null)
   const [companies, setCompanies] = useState<string[]>([])
   const [companyInput, setCompanyInput] = useState("")
   const [file, setFile] = useState<File | null>(null)
@@ -73,7 +96,6 @@ export function JobSearchView(
       if (Array.isArray(s.companies)) setCompanies(s.companies)
       if (Array.isArray(s.jobs)) setJobs(s.jobs)
       if (Array.isArray(s.companyJobs)) setCompanyJobs(s.companyJobs)
-      if (s.skillGap) setSkillGap(s.skillGap)
       if (Array.isArray(s.queries)) setQueries(s.queries)
       if (Array.isArray(s.sources)) setSources(s.sources)
       if (typeof s.linkedin === "string") setLinkedin(s.linkedin)
@@ -91,11 +113,11 @@ export function JobSearchView(
     if (!done) return
     try {
       localStorage.setItem(SNAP_KEY, JSON.stringify({
-        text, companies, jobs, companyJobs, skillGap, queries, sources,
+        text, companies, jobs, companyJobs, queries, sources,
         linkedin, fallback, searchedCompanies, profile, pages,
       }))
     } catch { /* localStorage 不可用/已滿則略過 */ }
-  }, [done, jobs, companyJobs, skillGap, queries, sources, linkedin, fallback,
+  }, [done, jobs, companyJobs, queries, sources, linkedin, fallback,
       searchedCompanies, profile, text, companies, pages])
 
   function addCompany(name: string) {
@@ -114,6 +136,9 @@ export function JobSearchView(
       setCompanies((c) => c.slice(0, -1))
     }
   }
+  function toggleRegion(k: string) {
+    setRegions((rs) => (rs.includes(k) ? rs.filter((x) => x !== k) : [...rs, k]))
+  }
 
   async function saveSearch(acc: SearchAcc, cs: string[]) {
     if (!acc.jobs.length && !acc.companyJobs.length) return
@@ -125,7 +150,7 @@ export function JobSearchView(
         body: JSON.stringify({
           label, profile: acc.profile,
           payload: {
-            jobs: acc.jobs, companyJobs: acc.companyJobs, skillGap: acc.skillGap,
+            jobs: acc.jobs, companyJobs: acc.companyJobs,
             queries: acc.queries, sources: acc.sources, searchedCompanies: cs,
             linkedin: acc.linkedin, fallback: acc.fallback,
           },
@@ -146,10 +171,10 @@ export function JobSearchView(
     abortRef.current = ctrl
 
     setBusy(true); setDone(false); setError(""); setJobs([]); setCompanyJobs([]); setQueries([]); setSources([])
-    setLinkedin(""); setProfile(null); setBlockedNote(""); setFallback(false); setSkillGap(null); setRankTotal(0)
+    setLinkedin(""); setProfile(null); setBlockedNote(""); setFallback(false); setRankTotal(0)
     setStatus("上傳中…")
     // 串流累積（供完成後存檔；state 更新非同步，存檔讀這裡的即時值）。
-    const acc: SearchAcc = { jobs: [], companyJobs: [], skillGap: null, queries: [], sources: [], linkedin: "", fallback: false, profile: null }
+    const acc: SearchAcc = { jobs: [], companyJobs: [], queries: [], sources: [], linkedin: "", fallback: false, profile: null }
     try {
       const resp = await fetch("/api/jobs/auto", { method: "POST", body: form, signal: ctrl.signal })
       await readSSE(resp, (ev: JobsAutoEvent) => {
@@ -164,7 +189,6 @@ export function JobSearchView(
           setJobs(acc.jobs)
         }
         else if (ev.type === "company_jobs") { acc.companyJobs = sortByFit(ev.data as JobMatch[]); setCompanyJobs(acc.companyJobs) }
-        else if (ev.type === "skill_gap") { acc.skillGap = ev.data; setSkillGap(ev.data as SkillGapReport) }
         else if (ev.type === "linkedin") { acc.linkedin = ev.url; setLinkedin(ev.url) }
         else if (ev.type === "error") setError(ev.message)
         else if (ev.type === "done") setDone(true)
@@ -197,9 +221,11 @@ export function JobSearchView(
 
   const pick = async (m: JobMatch) => onPick(await resolveJd(m.job), profile)
 
-  const visibleJobs = jobs.filter((m) => m.fit_score >= minFit)
-  const visibleCompany = companyJobs.filter((m) => m.fit_score >= minFit)
+  const passes = (m: JobMatch) => m.fit_score >= minFit && matchRegion(m.job.location, regions)
+  const visibleJobs = jobs.filter(passes)
+  const visibleCompany = companyJobs.filter(passes)
   const hiddenCount = (jobs.length - visibleJobs.length) + (companyJobs.length - visibleCompany.length)
+  const hasResults = jobs.length > 0 || companyJobs.length > 0
 
   return (
     <div>
@@ -309,45 +335,7 @@ export function JobSearchView(
         </div>
       )}
 
-      {skillGap && skillGap.top_demand.length > 0 && (() => {
-        const max = skillGap.top_demand[0].count || 1
-        return (
-          <Card className="p-5 mb-4">
-            <h3 className="font-bold mb-3 flex items-center gap-2 text-slate-900">
-              <span className="grid place-items-center w-7 h-7 rounded-lg bg-brand-50 text-brand-600"><Target className="w-4 h-4" /></span>
-              技能缺口分析
-            </h3>
-            {skillGap.your_gaps.length > 0 && (
-              <>
-                <p className="text-sm font-medium mb-1.5 text-slate-700">你最該補的技能（市場在要、你還沒有）</p>
-                <div className="flex flex-wrap gap-1.5 mb-3">
-                  {skillGap.your_gaps.slice(0, 12).map((g, i) => (
-                    <Badge key={i} tone="rose">{g.skill} ×{g.count}</Badge>
-                  ))}
-                </div>
-              </>
-            )}
-            <p className="text-sm font-medium mb-1.5 text-slate-700">市場熱門技能</p>
-            <div className="space-y-1.5">
-              {skillGap.top_demand.slice(0, 8).map((d, i) => {
-                const has = skillGap.have.some((h) => h.toLowerCase() === d.skill.toLowerCase())
-                return (
-                  <div key={i} className="flex items-center gap-2 text-sm">
-                    <span className="w-28 shrink-0 truncate text-slate-600">{d.skill}</span>
-                    <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full ${has ? "bg-emerald-500" : "bg-brand-500"}`}
-                        style={{ width: `${(d.count / max) * 100}%` }} />
-                    </div>
-                    <span className="w-6 text-right text-slate-400 text-xs">{d.count}</span>
-                  </div>
-                )
-              })}
-            </div>
-          </Card>
-        )
-      })()}
-
-      {/* 適配度門檻 + 進度（有結果或排序中才顯示） */}
+      {/* 結果標題 + 進度 + 適配色帶篩選 */}
       {(jobs.length > 0 || (busy && rankTotal > 0)) && (
         <div className="flex flex-wrap items-center gap-3 mb-3">
           <h2 className="font-semibold flex items-center gap-2">
@@ -359,17 +347,40 @@ export function JobSearchView(
               <Loader2 className="w-3.5 h-3.5 animate-spin" />已評分 {jobs.length} / {rankTotal}
             </span>
           )}
-          <label className="ml-auto flex items-center gap-2 text-sm text-slate-500">
-            只看 ≥ <span className="font-medium text-slate-700 w-7 text-right">{minFit}</span>
-            <input type="range" min={0} max={90} step={10} value={minFit}
-              onChange={(e) => setMinFit(Number(e.target.value))}
-              aria-label="最低適配度門檻" className="w-32 accent-brand-600" />
-          </label>
+          <div className="ml-auto flex items-center gap-1.5 text-sm" role="group" aria-label="適配篩選">
+            <span className="text-slate-500">適配</span>
+            {FIT_BANDS.map((o) => (
+              <button key={o.v} type="button" onClick={() => setMinFit(o.v)} aria-pressed={minFit === o.v}
+                className={`px-2.5 py-1 rounded-lg border text-xs transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 ${
+                  minFit === o.v ? "bg-brand-600 text-white border-brand-600" : "bg-white border-slate-300 text-slate-600 hover:bg-slate-50"
+                }`}>{o.l}</button>
+            ))}
+          </div>
           {linkedin && (
             <a href={linkedin} target="_blank" rel="noreferrer"
               className="text-sm text-brand-600 hover:underline inline-flex items-center gap-1 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300">
               也到 LinkedIn 搜尋 <ExternalLink className="w-3.5 h-3.5" />
             </a>
+          )}
+        </div>
+      )}
+
+      {/* 地區篩選 */}
+      {hasResults && (
+        <div className="flex flex-wrap items-center gap-1.5 mb-3 text-sm">
+          <span className="text-slate-500 inline-flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />地區</span>
+          {REGIONS.map((r) => {
+            const on = regions.includes(r.key)
+            return (
+              <button key={r.key} type="button" onClick={() => toggleRegion(r.key)} aria-pressed={on}
+                className={`px-2.5 py-1 rounded-full border text-xs transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 ${
+                  on ? "bg-brand-600 text-white border-brand-600" : "bg-white border-slate-300 text-slate-600 hover:bg-slate-50"
+                }`}>{r.key}</button>
+            )
+          })}
+          {regions.length > 0 && (
+            <button type="button" onClick={() => setRegions([])}
+              className="text-xs text-slate-400 hover:text-slate-600 ml-1 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300">清除</button>
           )}
         </div>
       )}
@@ -407,7 +418,7 @@ export function JobSearchView(
 
       {visibleJobs.length > 0 && <JobList matches={visibleJobs} onPick={pick} />}
       {jobs.length > 0 && visibleJobs.length === 0 && (
-        <p className="text-sm text-slate-400">目前門檻（≥ {minFit}）沒有符合的職缺，往左拉低門檻看看。</p>
+        <p className="text-sm text-slate-400">目前篩選（適配／地區）沒有符合的職缺，放寬條件看看。</p>
       )}
 
       {/* 指定公司的職缺（獨立區塊、獨立排序） */}
@@ -420,7 +431,7 @@ export function JobSearchView(
           {visibleCompany.length > 0 ? (
             <JobList matches={visibleCompany} onPick={pick} />
           ) : companyJobs.length > 0 ? (
-            <p className="text-sm text-slate-400">目前門檻（≥ {minFit}）沒有符合的公司職缺。</p>
+            <p className="text-sm text-slate-400">目前篩選（適配／地區）沒有符合的公司職缺。</p>
           ) : (
             <Card className="p-2">
               <EmptyState icon={Building2} title="指定公司目前查無相關開缺"
@@ -431,7 +442,7 @@ export function JobSearchView(
       )}
 
       {hiddenCount > 0 && (
-        <p className="text-xs text-slate-400 mt-3">已依「≥ {minFit} 分」隱藏 {hiddenCount} 筆較低適配職缺。</p>
+        <p className="text-xs text-slate-400 mt-3">已依篩選條件隱藏 {hiddenCount} 筆職缺。</p>
       )}
     </div>
   )
