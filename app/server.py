@@ -464,6 +464,34 @@ def interview_answer(body: InterviewAnswerBody):
     return fb.model_dump()
 
 
+class PipelineChatBody(BaseModel):
+    doc_type: str = "resume"          # resume | cover
+    current: str = ""                 # 目前文件內容（供上下文）
+    jd_text: str = ""
+    profile: dict | None = None
+    profile_path: str = "data/demo_profile.json"
+    messages: list[dict] = []          # [{role: user|assistant, content}]
+
+
+@app.post("/api/pipeline/chat")
+def pipeline_chat(body: PipelineChatBody):
+    """履歷／求職信的多輪對話修改：回覆建議，並（必要時）回傳修訂後的文件欄位。"""
+    from app.agents.refine import refine_document
+    try:
+        profile = _resolve_profile(body)
+        res = refine_document(body.doc_type, body.current, body.messages, body.jd_text, profile)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": f"AI 服務暫時無法使用，請稍後再試。（{type(exc).__name__}）"},
+                            status_code=400)
+    if body.doc_type == "resume":
+        updated = (None if res.updated_summary is None and res.updated_bullets is None
+                   else {"summary": res.updated_summary or "", "bullets": res.updated_bullets or []})
+    else:
+        updated = (None if res.updated_subject is None and res.updated_body is None
+                   else {"subject": res.updated_subject or "", "body": res.updated_body or ""})
+    return {"reply": res.reply, "updated": updated}
+
+
 @app.post("/api/interview/summary")
 def interview_summary(body: InterviewSummaryBody):
     from app.agents.interview_sim import summarize

@@ -421,6 +421,43 @@ def test_jobs_auto_passes_pages_to_search(monkeypatch):
     assert captured["pages"] == 1                       # 下界夾住
 
 
+def test_pipeline_chat_resume_applies_update(monkeypatch):
+    """履歷對話：AI 給修訂 → 端點回傳 reply + updated{summary,bullets}。"""
+    from app.agents import refine as refine_mod
+    from app.agents.refine import RefineResult
+    monkeypatch.setattr(refine_mod, "refine_document",
+                        lambda doc_type, current, messages, jd, profile: RefineResult(
+                            reply="已幫你強化 LLM 經驗",
+                            updated_summary="資深 LLM 工程師",
+                            updated_bullets=["打造 RAG 系統", "多代理編排"]))
+    client = TestClient(server_mod.app)
+    r = client.post("/api/pipeline/chat", json={
+        "doc_type": "resume", "current": "舊摘要", "jd_text": "LLM 工程師",
+        "profile": {"name": "王", "summary": "後端"},
+        "messages": [{"role": "user", "content": "強化 LLM 經驗"}],
+    })
+    assert r.status_code == 200
+    d = r.json()
+    assert d["reply"].startswith("已幫")
+    assert d["updated"]["summary"] == "資深 LLM 工程師"
+    assert d["updated"]["bullets"] == ["打造 RAG 系統", "多代理編排"]
+
+
+def test_pipeline_chat_discussion_returns_no_update(monkeypatch):
+    """純討論（無修訂）→ updated 為 None。"""
+    from app.agents import refine as refine_mod
+    from app.agents.refine import RefineResult
+    monkeypatch.setattr(refine_mod, "refine_document",
+                        lambda *a, **k: RefineResult(reply="可以考慮加上量化成果"))
+    client = TestClient(server_mod.app)
+    r = client.post("/api/pipeline/chat", json={
+        "doc_type": "cover", "profile": {"name": "王", "summary": "後端"},
+        "messages": [{"role": "user", "content": "這樣可以嗎"}],
+    })
+    assert r.status_code == 200
+    assert r.json()["updated"] is None
+
+
 def test_jobs_auto_lists_company_jobs_in_separate_event(monkeypatch):
     """指定公司名單時，公司開缺走獨立的 company_jobs 事件、與 AI 推薦分開排序。"""
     from app.models import Profile, JobPosting, JobMatch, SearchResult

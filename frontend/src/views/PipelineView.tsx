@@ -5,6 +5,7 @@ import { AgentTrace } from "../components/pipeline/AgentTrace"
 import {
   MatchCard, CompanyCard, ResumeDoc, CoverLetterDoc, InterviewKitDoc, CritiqueCard,
 } from "../components/pipeline/Documents"
+import { RefineChat } from "../components/pipeline/RefineChat"
 import { Card } from "../ui/Card"
 import { Button } from "../ui/Button"
 import { EmptyState } from "../ui/EmptyState"
@@ -176,6 +177,9 @@ export function PipelineView(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.nonce])
 
+  // 與 AI 討論修改時帶入的履歷背景（種子帶入的投遞包履歷，或共用 fallback）。
+  const refineProfile = seed?.profile ?? fallbackProfile ?? null
+
   const hasDocs = Boolean(
     state.match_report || state.company_brief || state.tailored_resume ||
     state.cover_letter || state.interview_kit || state.critique,
@@ -277,22 +281,44 @@ export function PipelineView(
           {state.match_report && <MatchCard m={state.match_report} />}
           {state.company_brief && <CompanyCard c={state.company_brief} />}
           {state.tailored_resume && (
-            <ResumeDoc
-              r={state.tailored_resume}
-              summary={edited?.resumeSummary}
-              bullets={edited?.resumeBullets}
-              onSummary={(v) => patch({ resumeSummary: v })}
-              onBullets={(v) => patch({ resumeBullets: v })}
-            />
+            <div>
+              <ResumeDoc
+                r={state.tailored_resume}
+                summary={edited?.resumeSummary}
+                bullets={edited?.resumeBullets}
+                onSummary={(v) => patch({ resumeSummary: v })}
+                onBullets={(v) => patch({ resumeBullets: v })}
+              />
+              <RefineChat
+                docType="resume"
+                current={`${edited?.resumeSummary ?? state.tailored_resume.summary}\n\n${edited?.resumeBullets ?? state.tailored_resume.bullets.join("\n")}`}
+                jd={jd} profile={refineProfile}
+                onApply={(u) => patch({
+                  ...(u.summary !== undefined ? { resumeSummary: u.summary } : {}),
+                  ...(u.bullets ? { resumeBullets: u.bullets.join("\n") } : {}),
+                })}
+              />
+            </div>
           )}
           {state.cover_letter && (
-            <CoverLetterDoc
-              c={state.cover_letter}
-              subject={edited?.coverSubject}
-              body={edited?.coverBody}
-              onSubject={(v) => patch({ coverSubject: v })}
-              onBody={(v) => patch({ coverBody: v })}
-            />
+            <div>
+              <CoverLetterDoc
+                c={state.cover_letter}
+                subject={edited?.coverSubject}
+                body={edited?.coverBody}
+                onSubject={(v) => patch({ coverSubject: v })}
+                onBody={(v) => patch({ coverBody: v })}
+              />
+              <RefineChat
+                docType="cover"
+                current={`主旨：${edited?.coverSubject ?? state.cover_letter.subject ?? ""}\n\n${edited?.coverBody ?? state.cover_letter.body}`}
+                jd={jd} profile={refineProfile}
+                onApply={(u) => patch({
+                  ...(u.subject !== undefined ? { coverSubject: u.subject } : {}),
+                  ...(u.body !== undefined ? { coverBody: u.body } : {}),
+                })}
+              />
+            </div>
           )}
           {state.interview_kit && <InterviewKitDoc k={state.interview_kit} />}
           {state.critique && <CritiqueCard q={state.critique} />}

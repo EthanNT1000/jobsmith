@@ -114,6 +114,9 @@ export interface AnswerFeedback {
 }
 export interface InterviewSummary { overall_score: number; summary: string; advice: string[] }
 
+// 與 AI 討論修改履歷/求職信時，後端回傳的修訂（對應 /api/pipeline/chat 的 updated）
+export interface RefineUpdate { summary?: string; bullets?: string[]; subject?: string; body?: string }
+
 // 投遞包可編輯欄位（履歷 summary/bullets、求職信 subject/body；bullets 以換行分隔）
 export interface EditablePackage {
   resumeSummary: string;
