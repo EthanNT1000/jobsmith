@@ -11,7 +11,7 @@ import { Button } from "../ui/Button"
 import { Badge } from "../ui/Badge"
 import { Skeleton } from "../ui/Skeleton"
 import { EmptyState } from "../ui/EmptyState"
-import { Search, Upload, Loader2, ExternalLink, AlertTriangle, CheckCircle2, XCircle, Building2, Layers, MapPin, X, ChevronUp, ChevronDown } from "../ui/icons"
+import { Search, Upload, Loader2, ExternalLink, AlertTriangle, CheckCircle2, XCircle, Building2, Layers, MapPin, X } from "../ui/icons"
 
 const SNAP_KEY = "copilot.jobsearch.v1"  // 上次搜尋結果快取（重新整理/重開沿用）
 
@@ -45,8 +45,14 @@ function mergeSource(arr: SourceStat[], ev: { source: string; count: number; blo
 }
 
 export function JobSearchView(
-  { onPick, onProfile }:
-  { onPick: (jd: string, profile?: UserProfile | null) => void; onProfile?: (p: UserProfile) => void },
+  { onPick, onProfile, formOpen, setFormOpen, onHasResults }:
+  {
+    onPick: (jd: string, profile?: UserProfile | null) => void
+    onProfile?: (p: UserProfile) => void
+    formOpen: boolean                    // 搜尋表單是否展開（提升到 App，收合鈕放右上角）
+    setFormOpen: (v: boolean) => void
+    onHasResults?: (v: boolean) => void  // 回報是否已有結果，App 才知道要不要顯示收合鈕
+  },
 ) {
   const [text, setText] = useState("")
   const [busy, setBusy] = useState(false)
@@ -69,7 +75,6 @@ export function JobSearchView(
   const [file, setFile] = useState<File | null>(null)
   const [searchedCompanies, setSearchedCompanies] = useState<string[]>([])
   const [pages, setPages] = useState(2)  // 每個來源抓幾頁（越多越全、但越慢）
-  const [formOpen, setFormOpen] = useState(true)  // 有結果後收合搜尋表單，從別頁回來直接看職缺列表
 
   const abortRef = useRef<AbortController | null>(null)  // 取消上一個未完成的搜尋
 
@@ -109,6 +114,12 @@ export function JobSearchView(
     } catch { /* localStorage 不可用/已滿則略過 */ }
   }, [done, jobs, companyJobs, queries, sources, linkedin, fallback,
       searchedCompanies, profile, text, companies, pages, regions])
+
+  // 回報是否已有結果，App 才知道要不要在右上角顯示「收合搜尋條件」鈕。
+  useEffect(() => {
+    onHasResults?.(jobs.length > 0 || companyJobs.length > 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs.length, companyJobs.length])
 
   function addCompany(name: string) {
     const n = name.trim()
@@ -221,14 +232,6 @@ export function JobSearchView(
 
   return (
     <div>
-      {hasResults && (
-        <div className="mb-4 flex justify-end">
-          <Button variant="secondary" size="sm" icon={formOpen ? ChevronUp : ChevronDown}
-            onClick={() => setFormOpen((o) => !o)}>
-            {formOpen ? "收合搜尋條件" : "修改搜尋條件 / 重新搜尋"}
-          </Button>
-        </div>
-      )}
       {(formOpen || !hasResults) && (
       <Card className="p-5 mb-5">
         <p className="text-sm text-slate-600 mb-2">

@@ -11,7 +11,8 @@ import { BackendSelector } from "./components/BackendSelector"
 import { Onboarding } from "./components/Onboarding"
 import { Sidebar } from "./ui/Sidebar"
 import type { NavItem } from "./ui/Sidebar"
-import { Compass, FileChartColumn, Workflow, MessagesSquare, Archive, Settings2, Search } from "./ui/icons"
+import { Button } from "./ui/Button"
+import { Compass, FileChartColumn, Workflow, MessagesSquare, Archive, Settings2, Search, ChevronUp, ChevronDown } from "./ui/icons"
 
 type Tab = "search" | "searches" | "resume" | "pipeline" | "interview" | "history" | "settings"
 
@@ -31,6 +32,9 @@ export default function App() {
   const [interviewSeed, setInterviewSeed] = useState<Seed | null>(null)
   // 從「我的投遞包」點進行中的那筆 → 工作台接回該背景產生看即時進度。
   const [watch, setWatch] = useState<{ threadId: string; packageId: number; title?: string; nonce: number } | null>(null)
+  // 自動找職缺的搜尋表單收合狀態提升到這裡，讓收合鈕放右上角（選擇模型左側）。
+  const [searchFormOpen, setSearchFormOpen] = useState(true)
+  const [searchHasResults, setSearchHasResults] = useState(false)
   // 使用者真實履歷（自動找職缺解析後共用），讓「投遞包工作台」分頁手動開跑也能用本人背景。
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [preferences, setPreferences] = useState<Preferences>({})
@@ -81,14 +85,21 @@ export default function App() {
           {/* 投遞包工作台要乾淨一頁式：不顯示右上角的執行模式/模型選擇，內容因此往上移。
               其餘分頁仍保留右上角的後端控制台。 */}
           {tab !== "pipeline" && (
-            <header className="mb-6 flex items-center justify-end">
+            <header className="mb-6 flex items-center justify-end gap-3">
+              {tab === "search" && searchHasResults && (
+                <Button variant="secondary" size="sm" icon={searchFormOpen ? ChevronUp : ChevronDown}
+                  onClick={() => setSearchFormOpen((o) => !o)}>
+                  {searchFormOpen ? "收合搜尋條件" : "修改搜尋條件"}
+                </Button>
+              )}
               <BackendSelector />
             </header>
           )}
 
           {/* 分頁全掛載只切顯示，保留狀態 */}
           <div className={tab === "search" ? "" : "hidden"}>
-            <JobSearchView onPick={pickJob} onProfile={setProfile} />
+            <JobSearchView onPick={pickJob} onProfile={setProfile}
+              formOpen={searchFormOpen} setFormOpen={setSearchFormOpen} onHasResults={setSearchHasResults} />
           </div>
           <div className={tab === "searches" ? "" : "hidden"}>
             <SearchHistoryView active={tab === "searches"} onPick={pickJob} />
