@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import type { Seed, UserProfile, Preferences } from "./types"
+import type { CandidateProfile, Seed, UserProfile, Preferences } from "./types"
 import { JobSearchView } from "./views/JobSearchView"
 import { ResumeHealthView } from "./views/ResumeHealthView"
 import { PipelineView } from "./views/PipelineView"
@@ -10,6 +10,10 @@ import { PreferencesView } from "./views/PreferencesView"
 import { BackendSelector } from "./components/BackendSelector"
 import { GithubStar } from "./components/GithubStar"
 import { Onboarding } from "./components/Onboarding"
+import {
+  loadCandidateProfiles, makeCandidateProfile, profileDisplayName,
+  saveCandidateProfiles, upsertCandidateProfile,
+} from "./lib/profiles"
 import { Sidebar } from "./ui/Sidebar"
 import type { NavItem } from "./ui/Sidebar"
 import { Button } from "./ui/Button"
@@ -36,34 +40,89 @@ export default function App() {
   // 自動找職缺的搜尋表單收合狀態提升到這裡，讓收合鈕放右上角（選擇模型左側）。
   const [searchFormOpen, setSearchFormOpen] = useState(true)
   const [searchHasResults, setSearchHasResults] = useState(false)
-  // 使用者真實履歷（自動找職缺解析後共用），讓「投遞包工作台」分頁手動開跑也能用本人背景。
-  const [profile, setProfile] = useState<UserProfile | null>(null)
+  // 目前 session 明確選用的候選人 Profile；重新開 app 後不自動沿用，避免拿錯人的履歷產出。
+  const [activeProfile, setActiveProfile] = useState<CandidateProfile | null>(null)
+  const [profiles, setProfiles] = useState<CandidateProfile[]>(() => loadCandidateProfiles())
   const [preferences, setPreferences] = useState<Preferences>({})
   const [privacyVersion, setPrivacyVersion] = useState(0)
   // 開場引導：第一次使用先選 AI 後端並測試連線；確認過後記在 localStorage 不再跳出。
   const [showOnboard, setShowOnboard] = useState(
     () => localStorage.getItem("copilot.backend.confirmed") !== "1")
 
-  // 開 app 載入記憶：有最近履歷則自動帶入（免重傳）、套用偏好。
+  // 開 app 載入記憶：偏好自動套用；後端舊版保存的履歷只放進可選 Profile 清單，不設為目前使用。
   useEffect(() => {
     fetch("/api/memory")
       .then((r) => r.json())
       .then((d) => {
-        if (d.profile) setProfile(d.profile as UserProfile)
+        if (d.profile) {
+          const profile = d.profile as UserProfile
+          setProfiles((ps) => upsertCandidateProfile(ps, makeCandidateProfile(profile, {
+            id: "memory-profile",
+            label: profileDisplayName(profile),
+            resumeLabel: "已儲存履歷",
+            saved: true,
+          })))
+        }
         if (d.preferences) setPreferences(d.preferences as Preferences)
       })
       .catch(() => {})
   }, [])
 
+  useEffect(() => {
+    saveCandidateProfiles(profiles)
+  }, [profiles])
+
+  function activateSessionProfile(profile: UserProfile, meta?: { label?: string; resumeLabel?: string }) {
+    const candidate = makeCandidateProfile(profile, {
+      label: meta?.label || profileDisplayName(profile),
+      resumeLabel: meta?.resumeLabel || "本次上傳履歷",
+      saved: false,
+    })
+    setActiveProfile(candidate)
+    return candidate
+  }
+
+  function selectProfile(profile: CandidateProfile | null) {
+    setActiveProfile(profile ? { ...profile, saved: true } : null)
+  }
+
+  async function saveActiveProfile(label?: string) {
+    if (!activeProfile) return
+    const saved: CandidateProfile = {
+      ...activeProfile,
+      label: (label || activeProfile.label).trim() || profileDisplayName(activeProfile.profile),
+      preferences,
+      saved: true,
+      updatedAt: new Date().toISOString(),
+    }
+    setProfiles((ps) => upsertCandidateProfile(ps, saved))
+    setActiveProfile(saved)
+    try {
+      await fetch("/api/memory/profile", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile: saved.profile }),
+      })
+    } catch { /* 本機 Profile 已儲存，後端備份失敗不阻斷使用 */ }
+  }
+
+  function deleteProfile(id: string) {
+    setProfiles((ps) => ps.filter((p) => p.id !== id))
+    if (activeProfile?.id === id) setActiveProfile(null)
+    fetch("/api/memory/profile", { method: "DELETE" }).catch(() => {})
+  }
+
   function pickJob(jd: string, picked?: UserProfile | null) {
-    if (picked) setProfile(picked)
-    setSeed({ jd, profile: picked ?? profile, nonce: Date.now() })
+    const nextProfile = picked ?? activeProfile?.profile ?? null
+    if (picked) activateSessionProfile(picked, { resumeLabel: "搜尋紀錄履歷" })
+    setSeed({ jd, profile: nextProfile, nonce: Date.now() })
     setTab("pipeline")
   }
 
   // 從「我的投遞包」用該份 JD + 履歷直接開面試模擬。
   function startInterview(jd: string, picked?: UserProfile | null) {
-    setInterviewSeed({ jd, profile: picked ?? profile, nonce: Date.now() })
+    const nextProfile = picked ?? activeProfile?.profile ?? null
+    if (picked) activateSessionProfile(picked, { resumeLabel: "投遞包履歷" })
+    setInterviewSeed({ jd, profile: nextProfile, nonce: Date.now() })
     setTab("interview")
   }
 
@@ -79,7 +138,8 @@ export default function App() {
   }
 
   function clearPersonalState() {
-    setProfile(null)
+    setActiveProfile(null)
+    setProfiles([])
     setPreferences({})
     setSeed(null)
     setInterviewSeed(null)
@@ -110,27 +170,32 @@ export default function App() {
 
           {/* 分頁全掛載只切顯示，保留狀態 */}
           <div key={`search-${privacyVersion}`} className={tab === "search" ? "" : "hidden"}>
-            <JobSearchView onPick={pickJob} onProfile={setProfile}
+            <JobSearchView onPick={pickJob} onProfile={activateSessionProfile}
               formOpen={searchFormOpen} setFormOpen={setSearchFormOpen} onHasResults={setSearchHasResults} />
           </div>
           <div key={`searches-${privacyVersion}`} className={tab === "searches" ? "" : "hidden"}>
             <SearchHistoryView active={tab === "searches"} onPick={pickJob} />
           </div>
           <div key={`resume-${privacyVersion}`} className={tab === "resume" ? "" : "hidden"}>
-            <ResumeHealthView onProfile={setProfile} />
+            <ResumeHealthView onProfile={activateSessionProfile} />
           </div>
           <div key={`pipeline-${privacyVersion}`} className={tab === "pipeline" ? "" : "hidden"}>
-            <PipelineView seed={seed} fallbackProfile={profile} preferences={preferences}
-              watch={watch} onBack={() => setTab("search")} />
+            <PipelineView seed={seed} activeProfile={activeProfile} profiles={profiles}
+              preferences={preferences} watch={watch} onBack={() => setTab("search")}
+              onSelectProfile={selectProfile} onSaveActiveProfile={saveActiveProfile}
+              onDeleteProfile={deleteProfile} onClearActiveProfile={() => setActiveProfile(null)} />
           </div>
           <div key={`interview-${privacyVersion}`} className={tab === "interview" ? "" : "hidden"}>
-            <InterviewView active={tab === "interview"} fallbackProfile={profile} seed={interviewSeed} />
+            <InterviewView active={tab === "interview"} activeProfile={activeProfile} seed={interviewSeed} />
           </div>
           <div key={`history-${privacyVersion}`} className={tab === "history" ? "" : "hidden"}>
             <HistoryView active={tab === "history"} onReopen={pickJob} onInterview={startInterview} onWatch={watchRun} />
           </div>
           <div className={tab === "settings" ? "" : "hidden"}>
-            <PreferencesView value={preferences} onSave={setPreferences} onClearData={clearPersonalState} />
+            <PreferencesView value={preferences} onSave={setPreferences} onClearData={clearPersonalState}
+              profiles={profiles} activeProfile={activeProfile} onSelectProfile={selectProfile}
+              onSaveActiveProfile={saveActiveProfile} onDeleteProfile={deleteProfile}
+              onClearActiveProfile={() => setActiveProfile(null)} />
           </div>
         </div>
       </div>

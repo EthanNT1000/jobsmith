@@ -76,6 +76,18 @@ export interface Preferences {
   target_titles?: string[]; seniority?: string; tone?: string; emphasize_skills?: string[];
 }
 
+// 使用者明確儲存的候選人 Profile；跨 session 只保留清單，不自動設為目前使用。
+export interface CandidateProfile {
+  id: string;
+  label: string;
+  profile: UserProfile;
+  resumeLabel?: string;
+  preferences?: Preferences;
+  createdAt: string;
+  updatedAt: string;
+  saved?: boolean;
+}
+
 // 技能缺口市場分析（對應後端 app/agents/skill_gap.py）
 export interface SkillCount { skill: string; count: number }
 export interface SkillGapReport { top_demand: SkillCount[]; your_gaps: SkillCount[]; have: string[] }

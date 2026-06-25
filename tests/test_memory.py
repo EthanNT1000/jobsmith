@@ -18,3 +18,12 @@ def test_partial_update_keeps_other_field():
     m = memory.get_memory()
     assert m["profile"]["name"] == "李"        # 存偏好不該洗掉履歷
     assert m["preferences"]["tone"] == "務實"
+
+
+def test_clear_profile_keeps_preferences():
+    memory.save_profile({"name": "陳"})
+    memory.save_preferences({"tone": "直接"})
+    memory.clear_profile()
+    m = memory.get_memory()
+    assert m["profile"] is None
+    assert m["preferences"]["tone"] == "直接"

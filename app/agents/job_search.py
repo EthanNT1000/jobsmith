@@ -1,6 +1,7 @@
 """職缺探索 agent：從履歷推導搜尋關鍵字、對搜到的職缺依履歷排序。"""
 from pydantic import BaseModel, Field, field_validator
 
+from app.agents.skill_lexicon import extract_skills
 from app.llm import get_llm
 from app.models import JobMatch, JobPosting, Profile, coerce_str, coerce_str_list
 
@@ -66,22 +67,83 @@ def _profile_brief(profile: Profile) -> str:
     )
 
 
+def _fallback_queries(profile: Profile) -> list[str]:
+    """LLM 結構化輸出失敗時的本機查詢詞備援。"""
+    candidates: list[str] = []
+    candidates.extend(str(r).strip() for r in (profile.preferred_roles or []) if str(r).strip())
+    skills = [str(s).strip() for s in (profile.skills or []) if str(s).strip()]
+    skill_blob = " ".join(skills).lower()
+    summary = (profile.summary or "").lower()
+    if any(k in skill_blob for k in ("llm", "rag", "langchain", "langgraph", "openai")):
+        candidates.append("AI 工程師")
+    if "python" in skill_blob:
+        candidates.append("Python 後端")
+    if any(k in summary for k in ("data", "資料", "數據")):
+        candidates.append("資料工程師")
+    candidates.extend(skills[:3])
+    out = []
+    for c in candidates:
+        if c and c not in out:
+            out.append(c)
+    return out[:3] or ["工程師"]
+
+
 def derive_queries(profile: Profile) -> list[str]:
     """從履歷推導搜尋關鍵字（cheap 分層）。"""
-    llm = get_llm("cheap").with_structured_output(SearchQueries)
-    out = llm.invoke([("system", QUERY_SYSTEM), ("human", _profile_brief(profile))])
-    queries = [q.strip() for q in out.queries if q.strip()][:3]
+    try:
+        llm = get_llm("cheap").with_structured_output(SearchQueries)
+        out = llm.invoke([("system", QUERY_SYSTEM), ("human", _profile_brief(profile))])
+        queries = [q.strip() for q in out.queries if q.strip()][:3]
+    except Exception:
+        return _fallback_queries(profile)
     if queries:
         return queries
-    # 後備：用期望職務或首要技能
-    if profile.preferred_roles:
-        return [profile.preferred_roles[0]]
-    if profile.skills:
-        return [profile.skills[0]]
-    return ["工程師"]
+    return _fallback_queries(profile)
 
 
 _RANK_INPUT_MAX = 50  # 送 LLM 排序的職缺上限（控 prompt 大小/成本）；超出者不送排序
+
+
+def _job_blob(j: JobPosting) -> str:
+    return " ".join([
+        j.title or "", j.company or "", j.location or "", j.snippet or "",
+        " ".join(str(r) for r in (j.requirements or [])), j.raw_text or "",
+    ]).lower()
+
+
+def _profile_blob(profile: Profile) -> str:
+    return " ".join([
+        profile.summary or "", " ".join(profile.skills or ""),
+        " ".join(profile.experiences or ""), " ".join(profile.preferred_roles or ""),
+    ])
+
+
+def _fallback_rank_jobs(profile: Profile, jobs: list[JobPosting], top_k: int | None = None) -> list[JobMatch]:
+    """LLM 排序失敗時仍給使用者可用列表：以技能/職稱關鍵字重疊估分。"""
+    have_skills = set(extract_skills(_profile_blob(profile)))
+    raw_skills = [str(s).strip() for s in (profile.skills or []) if str(s).strip()]
+    roles = [str(r).strip().lower() for r in (profile.preferred_roles or []) if str(r).strip()]
+    matches: list[JobMatch] = []
+    for job in jobs:
+        blob = _job_blob(job)
+        job_skills = set(extract_skills(blob))
+        skill_hits = sorted(have_skills & job_skills)
+        raw_hits = [s for s in raw_skills if s.lower() in blob and s not in skill_hits]
+        role_hits = [r for r in roles if r and r in blob]
+        score = 35 + min(40, 12 * len(skill_hits) + 8 * len(raw_hits)) + min(15, 15 * len(role_hits))
+        if not skill_hits and not raw_hits and not role_hits:
+            score = 30
+        gaps = sorted(job_skills - have_skills)[:6]
+        reason = "AI 排序暫時不可用，已改用本機技能與職稱關鍵字比對。"
+        matches.append(JobMatch(
+            job=job,
+            fit_score=min(90, score),
+            matched=[*skill_hits, *raw_hits, *role_hits],
+            gaps=gaps,
+            reason=reason,
+        ))
+    matches.sort(key=lambda m: (-m.fit_score, m.job.url or (m.job.title + m.job.company)))
+    return matches if top_k is None else matches[:top_k]
 
 
 def rank_jobs(profile: Profile, jobs: list[JobPosting], top_k: int | None = None) -> list[JobMatch]:
@@ -100,7 +162,10 @@ def rank_jobs(profile: Profile, jobs: list[JobPosting], top_k: int | None = None
     )
     llm = get_llm("standard", max_tokens=4000).with_structured_output(_RankResult)
     human = f"【求職者】\n{_profile_brief(profile)}\n\n【職缺清單】\n{listing}"
-    out = llm.invoke([("system", RANK_SYSTEM), ("human", human)])
+    try:
+        out = llm.invoke([("system", RANK_SYSTEM), ("human", human)])
+    except Exception:
+        return _fallback_rank_jobs(profile, jobs + overflow, top_k)
     by_idx = {r.index: r for r in out.rankings}
 
     matches: list[JobMatch] = []

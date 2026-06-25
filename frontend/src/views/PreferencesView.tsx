@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
-import type { Preferences } from "../types"
+import type { CandidateProfile, Preferences } from "../types"
 import { clearLocalPersonalData } from "../lib/privacy"
+import { CandidateProfileManager } from "../components/CandidateProfileManager"
 import { Card } from "../ui/Card"
 import { Button } from "../ui/Button"
 import { Settings2, CheckCircle2, Trash2, FileText } from "../ui/icons"
@@ -12,8 +13,21 @@ function split(s: string): string[] {
 }
 
 export function PreferencesView(
-  { value, onSave, onClearData }:
-  { value: Preferences; onSave: (p: Preferences) => void; onClearData?: () => void },
+  {
+    value, onSave, onClearData, profiles, activeProfile, onSelectProfile,
+    onSaveActiveProfile, onDeleteProfile, onClearActiveProfile,
+  }:
+  {
+    value: Preferences
+    onSave: (p: Preferences) => void
+    onClearData?: () => void
+    profiles: CandidateProfile[]
+    activeProfile: CandidateProfile | null
+    onSelectProfile: (p: CandidateProfile | null) => void
+    onSaveActiveProfile: (label?: string) => void | Promise<void>
+    onDeleteProfile: (id: string) => void
+    onClearActiveProfile: () => void
+  },
 ) {
   const [titles, setTitles] = useState((value.target_titles || []).join("、"))
   const [seniority, setSeniority] = useState(value.seniority || "")
@@ -93,10 +107,23 @@ export function PreferencesView(
 
   const field = "w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-200"
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-3xl">
       <h2 className="font-semibold mb-1 flex items-center gap-2">
-        <Settings2 className="w-5 h-5 text-brand-600" />個人化偏好
+        <Settings2 className="w-5 h-5 text-brand-600" />個人化
       </h2>
+      <p className="text-sm text-slate-500 mb-4">Profile 用來選履歷；偏好用來調整產出方向。兩者分開儲存與管理。</p>
+      <Card className="p-5 mb-5">
+        <CandidateProfileManager
+          profiles={profiles}
+          activeProfile={activeProfile}
+          preferences={value}
+          onSelectProfile={onSelectProfile}
+          onSaveActiveProfile={onSaveActiveProfile}
+          onDeleteProfile={onDeleteProfile}
+          onClearActiveProfile={onClearActiveProfile}
+        />
+      </Card>
+      <h3 className="font-semibold mb-1">產出偏好</h3>
       <p className="text-sm text-slate-500 mb-4">這些偏好會套用到客製履歷、求職信與面試準備，讓產出更貼近你的方向。</p>
       <Card className="p-5 space-y-4">
         <div>

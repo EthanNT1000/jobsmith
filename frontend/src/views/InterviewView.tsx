@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
-import type { UserProfile, InterviewQuestion, AnswerFeedback, InterviewSummary, Seed } from "../types"
+import type { CandidateProfile, UserProfile, InterviewQuestion, AnswerFeedback, InterviewSummary, Seed } from "../types"
+import { profileDisplayName } from "../lib/profiles"
 import { Card } from "../ui/Card"
 import { Button } from "../ui/Button"
 import { Badge } from "../ui/Badge"
@@ -7,6 +8,7 @@ import { EmptyState } from "../ui/EmptyState"
 import { ScoreRing } from "../components/ScoreRing"
 import {
   MessagesSquare, CheckCircle2, AlertTriangle, RefreshCw, ArrowRight, Archive, Loader2, X,
+  UserRound,
 } from "../ui/icons"
 
 interface PkgPick {
@@ -41,8 +43,8 @@ const jdTitle = (jd: string) =>
   jd.split("\n").map((s) => s.trim()).find(Boolean)?.slice(0, 24) || "面試"
 
 export function InterviewView(
-  { active, fallbackProfile, seed }:
-  { active?: boolean; fallbackProfile?: UserProfile | null; seed?: Seed | null },
+  { active, activeProfile, seed }:
+  { active?: boolean; activeProfile?: CandidateProfile | null; seed?: Seed | null },
 ) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [currentKey, setCurrentKey] = useState<string | null>(null)
@@ -100,7 +102,7 @@ export function InterviewView(
     try {
       const d = await (await fetch(`/api/history/${p.id}`)).json()
       if (!d.jd_text) { patch(key, { loading: false, error: "這筆投遞包沒有可用的 JD。" }); return }
-      await beginQuestions(key, d.jd_text, d.profile ?? fallbackProfile ?? null)
+      await beginQuestions(key, d.jd_text, d.profile ?? activeProfile?.profile ?? null)
     } catch {
       patch(key, { loading: false, error: "載入投遞包失敗，請稍後再試。" })
     }
@@ -163,7 +165,7 @@ export function InterviewView(
   useEffect(() => {
     if (!seed?.jd) return
     const timer = window.setTimeout(() => {
-      void startSession("seed-" + seed.nonce, jdTitle(seed.jd), seed.jd, seed.profile ?? fallbackProfile ?? null)
+      void startSession("seed-" + seed.nonce, jdTitle(seed.jd), seed.jd, seed.profile ?? activeProfile?.profile ?? null)
     }, 0)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -229,18 +231,24 @@ export function InterviewView(
           <p className="text-sm text-slate-600 mb-2">
             {packages.length > 0 ? "或貼上" : "貼上"}目標職缺 JD，AI 面試官會依你的履歷出題、逐題給回饋與評分。
           </p>
+          <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 flex items-center gap-2">
+            <UserRound className="w-4 h-4 text-slate-400 shrink-0" />
+            {activeProfile
+              ? <>目前使用 Profile：<span className="font-medium text-slate-800">{profileDisplayName(activeProfile.profile)}</span></>
+              : "目前未選 Profile；開始後會使用範例背景示意。"}
+          </div>
           <textarea
             className="w-full border border-slate-300 rounded-lg p-3 text-sm h-32 focus:outline-none focus:ring-2 focus:ring-brand-200"
             placeholder="貼上職缺 JD 文字…" value={manualJd} onChange={(e) => setManualJd(e.target.value)} />
           <div className="flex flex-wrap gap-2 mt-3">
             <Button icon={MessagesSquare} disabled={!manualJd.trim()}
-              onClick={() => { startSession("manual-" + Date.now(), jdTitle(manualJd), manualJd, fallbackProfile ?? null); setManualJd("") }}>
+              onClick={() => { startSession("manual-" + Date.now(), jdTitle(manualJd), manualJd, activeProfile?.profile ?? null); setManualJd("") }}>
               開始面試
             </Button>
             <Button variant="secondary" onClick={loadSample}>載入範例 JD</Button>
           </div>
         </Card>
-        {!fallbackProfile && packages.length === 0 && sessions.length === 0 && (
+        {!activeProfile && packages.length === 0 && sessions.length === 0 && (
           <Card className="p-2">
             <EmptyState icon={MessagesSquare} title="先到「自動找職缺」或「履歷健檢」提供履歷"
               desc="面試官會依你的真實背景出題；沒有履歷時會用範例背景示意。" />

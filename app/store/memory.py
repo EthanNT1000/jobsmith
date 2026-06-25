@@ -1,4 +1,4 @@
-"""使用者記憶：跨 session 記住最近履歷與個人化偏好（user_memory 單列）。"""
+"""使用者記憶：明確儲存的履歷與個人化偏好（user_memory 單列）。"""
 from __future__ import annotations
 
 import json
@@ -45,6 +45,10 @@ def save_profile(profile: dict) -> None:
 
 def save_preferences(prefs: dict) -> None:
     _upsert(preferences_json=json.dumps(prefs, ensure_ascii=False))
+
+
+def clear_profile() -> None:
+    _upsert(profile_json="")
 
 
 def clear_memory() -> None:

@@ -10,20 +10,24 @@ import { Skeleton } from "../ui/Skeleton"
 import { EmptyState } from "../ui/EmptyState"
 import { Gauge, Upload, Loader2 } from "../ui/icons"
 
-export function ResumeHealthView({ onProfile }: { onProfile?: (p: UserProfile) => void }) {
+export function ResumeHealthView(
+  { onProfile }: { onProfile?: (p: UserProfile, meta?: { label?: string; resumeLabel?: string }) => void },
+) {
   const [text, setText] = useState("")
   const [status, setStatus] = useState("")
   const [busy, setBusy] = useState(false)
   const [assessment, setAssessment] = useState<ResumeAssessment | null>(null)
   const [error, setError] = useState("")
 
-  async function evaluate(form: FormData) {
+  async function evaluate(form: FormData, resumeLabel: string) {
     setBusy(true); setError(""); setAssessment(null); setStatus("上傳中…")
     try {
       const resp = await fetch("/api/resume/evaluate", { method: "POST", body: form })
       await readSSE(resp, (ev: SSEEvent) => {
         if (ev.type === "progress") setStatus(ev.message)
-        else if (ev.type === "profile") onProfile?.(ev.data as UserProfile)  // 共用真實履歷給投遞包工作台
+        else if (ev.type === "profile") {
+          onProfile?.(ev.data as UserProfile, { resumeLabel })  // 本次 session 共用，跨 session 需手動儲存 Profile
+        }
         else if (ev.type === "assessment") setAssessment(ev.data as ResumeAssessment)
         else if (ev.type === "error") setError(ev.message)
         else if (ev.type === "done") setStatus("完成 ✅")
@@ -39,7 +43,7 @@ export function ResumeHealthView({ onProfile }: { onProfile?: (p: UserProfile) =
     if (!text.trim()) { setError("請先貼上或載入履歷文字"); return }
     const form = new FormData()
     form.append("resume_text", text)
-    evaluate(form)
+    evaluate(form, "貼上的履歷")
   }
 
   function onFile(e: ChangeEvent<HTMLInputElement>) {
@@ -47,7 +51,7 @@ export function ResumeHealthView({ onProfile }: { onProfile?: (p: UserProfile) =
     if (!f) return
     const form = new FormData()
     form.append("file", f)
-    evaluate(form)
+    evaluate(form, f.name)
     e.target.value = ""
   }
 

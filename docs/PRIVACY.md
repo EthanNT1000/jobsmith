@@ -6,7 +6,7 @@ Jobsmith 是 local-first 的桌面 / 網頁 app。它不提供 hosted backend，
 
 App 會把下列資料存在你的電腦：
 
-- 最近解析的履歷 / 個人 profile 記憶
+- 使用者明確儲存的候選人 Profile（履歷結構化資料）
 - 個人化偏好
 - 已儲存的職缺搜尋結果
 - 已產生的投遞包
@@ -25,12 +25,16 @@ Windows `.exe` 版本會盡量把 app data 寫在執行檔旁的 `JobsmithData/`
 
 Jobsmith 本身不營運雲端資料服務。如果你設定第三方 AI endpoint，該 provider 的資料政策會適用。
 
+## 候選人 Profile
+
+履歷解析完成後只會在目前 session 使用；要跨 session 免重傳，必須在 **個人化 → 候選人 Profile** 明確儲存。重新開啟 App 後，已儲存 Profile 也不會自動套用到產出，使用前需要手動選擇。
+
 ## 清除個人資料
 
-在 app 內開啟 **設定 → 清除個人資料**，會清除：
+在 app 內開啟 **個人化 → 清除個人資料**，會清除：
 
 - 瀏覽器中的履歷 / 搜尋 / run 快取
-- 已儲存的 profile 記憶與偏好
+- 已儲存的候選人 Profile 與偏好
 - 已儲存的搜尋紀錄
 - 已產生的投遞包歷史
 - 記憶體中的 run snapshot

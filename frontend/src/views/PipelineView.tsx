@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react"
-import type { PipelineState, Seed, UserProfile, TelemetryEntry, Preferences } from "../types"
+import type { CandidateProfile, PipelineState, Seed, UserProfile, TelemetryEntry, Preferences } from "../types"
 import { AgentTrace } from "../components/pipeline/AgentTrace"
+import { CandidateProfileManager } from "../components/CandidateProfileManager"
+import { makeCandidateProfile, profileDisplayName } from "../lib/profiles"
 import {
   MatchCard, CompanyCard, ResumeDoc, CoverLetterDoc, InterviewKitDoc, CritiqueCard,
 } from "../components/pipeline/Documents"
@@ -26,15 +28,23 @@ interface RunEvent {
 }
 
 export function PipelineView(
-  { seed, fallbackProfile, preferences, watch, onBack }:
   {
-    seed?: Seed | null; fallbackProfile?: UserProfile | null; preferences?: Preferences
+    seed, activeProfile, profiles, preferences, watch, onBack, onSelectProfile,
+    onSaveActiveProfile, onDeleteProfile, onClearActiveProfile,
+  }:
+  {
+    seed?: Seed | null; activeProfile?: CandidateProfile | null; profiles: CandidateProfile[]; preferences?: Preferences
     watch?: { threadId: string; packageId: number; title?: string; nonce: number } | null
     onBack?: () => void
+    onSelectProfile: (p: CandidateProfile | null) => void
+    onSaveActiveProfile: (label?: string) => void | Promise<void>
+    onDeleteProfile: (id: string) => void
+    onClearActiveProfile: () => void
   },
 ) {
   const [jd, setJd] = useState("")
   const [manualJd, setManualJd] = useState("")
+  const [pendingJd, setPendingJd] = useState("")
   const [phase, setPhase] = useState<Phase>("idle")
   const [status, setStatus] = useState("")
   const [done, setDone] = useState<string[]>([])
@@ -130,7 +140,7 @@ export function PipelineView(
   // 完成後自動存進「我的投遞包」(待審)；離開頁面/重新整理都不中斷。
   async function run(jdText: string, profile?: UserProfile | null) {
     if (!jdText.trim()) return
-    const effectiveProfile = profile ?? fallbackProfile ?? null
+    const effectiveProfile = profile ?? null
     resetView(); setJd(jdText); setPhase("running"); setStatus("啟動中…")
     try {
       const r = await fetch("/api/run", {
@@ -149,11 +159,11 @@ export function PipelineView(
     }
   }
 
-  // 從「自動找職缺」帶 JD 進來 → 立刻在背景產生（seed.nonce 外部訊號觸發）。
+  // 從「自動找職缺」帶 JD 進來 → 先進產出前確認，避免沿用錯誤 Profile。
   useEffect(() => {
     if (!seed?.jd) return
     const timer = window.setTimeout(() => {
-      void run(seed.jd, seed.profile)
+      resetView(); setPendingJd(seed.jd); setJd(""); setManualJd(""); setPhase("idle"); setStatus("")
     }, 0)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -163,7 +173,7 @@ export function PipelineView(
   useEffect(() => {
     if (!watch?.threadId) return
     const timer = window.setTimeout(() => {
-      resetView(); setJd(watch.title || "")
+      resetView(); setPendingJd(""); setJd(watch.title || "")
       localStorage.setItem(RUN_KEY, JSON.stringify(
         { threadId: watch.threadId, packageId: watch.packageId, jd: watch.title || "" }))
       startPolling(watch.threadId, watch.packageId)
@@ -216,7 +226,23 @@ export function PipelineView(
   const curPage = Math.min(page, Math.max(0, pages.length - 1))
   const hasDocs = pages.length > 0
   const jdTitle = jd.split("\n").map((s) => s.trim()).find(Boolean) || "此職缺"
-  const idleEmpty = phase === "idle" && !hasDocs
+  const pendingTitle = pendingJd.split("\n").map((s) => s.trim()).find(Boolean) || "此職缺"
+  const idleConfirm = phase === "idle" && !hasDocs && Boolean(pendingJd.trim())
+  const idleEmpty = phase === "idle" && !hasDocs && !pendingJd.trim()
+  const seedProfile = seed?.profile && !activeProfile
+    ? makeCandidateProfile(seed.profile, {
+        label: profileDisplayName(seed.profile),
+        resumeLabel: "本次帶入履歷",
+        saved: false,
+      })
+    : null
+  const confirmProfile = activeProfile || seedProfile
+
+  function confirmRun(useProfile: boolean) {
+    const text = pendingJd.trim() ? pendingJd : manualJd
+    setPendingJd("")
+    void run(text, useProfile ? confirmProfile?.profile ?? null : null)
+  }
 
   return (
     <div>
@@ -227,7 +253,36 @@ export function PipelineView(
         </button>
       )}
 
-      {idleEmpty ? (
+      {idleConfirm ? (
+        <Card className="p-5">
+          <div className="mb-4">
+            <p className="text-xs text-slate-400 mb-1">產出前確認</p>
+            <h2 className="font-semibold text-lg text-slate-900 truncate" title={pendingTitle}>{pendingTitle}</h2>
+            <p className="text-sm text-slate-500 mt-1">
+              產生前請確認要使用哪一位候選人的 Profile，避免把不同人的履歷套到同一份投遞包。
+            </p>
+          </div>
+          <CandidateProfileManager
+            compact
+            profiles={profiles}
+            activeProfile={confirmProfile || null}
+            preferences={preferences}
+            onSelectProfile={onSelectProfile}
+            onSaveActiveProfile={activeProfile ? onSaveActiveProfile : undefined}
+            onDeleteProfile={onDeleteProfile}
+            onClearActiveProfile={onClearActiveProfile}
+          />
+          <div className="mt-5 flex flex-wrap gap-2">
+            <Button icon={Sparkles} disabled={!confirmProfile} onClick={() => confirmRun(true)}>
+              使用此 Profile 生成
+            </Button>
+            <Button variant="secondary" onClick={() => confirmRun(false)}>
+              不使用 Profile
+            </Button>
+            <Button variant="ghost" onClick={() => setPendingJd("")}>取消</Button>
+          </div>
+        </Card>
+      ) : idleEmpty ? (
         // 空狀態：從「自動找職缺」按產生投遞包，或直接貼 JD 產生。
         <Card className="p-5">
           <p className="text-sm text-slate-600 mb-3">
@@ -239,7 +294,9 @@ export function PipelineView(
             className="w-full border border-slate-300 rounded-lg p-3 text-sm h-32 focus:outline-none focus:ring-2 focus:ring-brand-200"
             placeholder="貼上職缺 JD 文字…" value={manualJd} onChange={(e) => setManualJd(e.target.value)} />
           <div className="mt-3">
-            <Button icon={Sparkles} disabled={!manualJd.trim()} onClick={() => run(manualJd)}>產生投遞包</Button>
+            <Button icon={Sparkles} disabled={!manualJd.trim()} onClick={() => setPendingJd(manualJd)}>
+              確認生成設定
+            </Button>
           </div>
           {error && <p className="text-sm text-rose-600 mt-2">{error}</p>}
         </Card>

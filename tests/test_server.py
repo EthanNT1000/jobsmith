@@ -427,6 +427,7 @@ def test_index_serves_html():
 
 def test_resume_evaluate_with_text(monkeypatch):
     from app.models import Profile, ResumeAssessment
+    server_mod._memory.clear_memory()
     monkeypatch.setattr(server_mod, "structure_profile",
                         lambda text: Profile(name="王小明", summary="後端工程師", raw_text=text))
     monkeypatch.setattr(server_mod, "evaluate_resume",
@@ -444,6 +445,23 @@ def test_resume_evaluate_with_text(monkeypatch):
     assert types[-1] == "done"
     assessment_ev = next(e for e in events if e["type"] == "assessment")
     assert assessment_ev["data"]["overall_score"] == 80
+    assert server_mod._memory.get_memory()["profile"] is None  # 解析履歷不應無提示跨 session 保存
+
+
+def test_memory_profile_requires_explicit_save_and_can_delete():
+    server_mod._memory.clear_memory()
+    client = TestClient(server_mod.app)
+
+    r = client.put("/api/memory/profile", json={"profile": {"name": "王小明", "summary": "後端工程師"}})
+    assert r.status_code == 200
+    assert server_mod._memory.get_memory()["profile"]["name"] == "王小明"
+
+    bad = client.put("/api/memory/profile", json={"profile": {"skills": ["Python"]}})
+    assert bad.status_code == 400
+
+    gone = client.delete("/api/memory/profile")
+    assert gone.status_code == 200
+    assert server_mod._memory.get_memory()["profile"] is None
 
 
 def test_resume_evaluate_empty_returns_error():

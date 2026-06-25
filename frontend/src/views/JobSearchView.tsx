@@ -48,7 +48,7 @@ export function JobSearchView(
   { onPick, onProfile, formOpen, setFormOpen, onHasResults }:
   {
     onPick: (jd: string, profile?: UserProfile | null) => void
-    onProfile?: (p: UserProfile) => void
+    onProfile?: (p: UserProfile, meta?: { label?: string; resumeLabel?: string }) => void
     formOpen: boolean                    // 搜尋表單是否展開（提升到 App，收合鈕放右上角）
     setFormOpen: (v: boolean) => void
     onHasResults?: (v: boolean) => void  // 回報是否已有結果，App 才知道要不要顯示收合鈕
@@ -96,7 +96,7 @@ export function JobSearchView(
       if (Array.isArray(s.searchedCompanies)) setSearchedCompanies(s.searchedCompanies)
       if (typeof s.pages === "number") setPages(s.pages)
       if (Array.isArray(s.regions)) setRegions(s.regions)
-      if (s.profile) { setProfile(s.profile as UserProfile); onProfile?.(s.profile as UserProfile) }
+      if (s.profile) setProfile(s.profile as UserProfile)
       if (Array.isArray(s.jobs) && s.jobs.length) { setDone(true); setFormOpen(false) }
       else if (Array.isArray(s.companyJobs) && s.companyJobs.length) { setDone(true); setFormOpen(false) }
     } catch { /* 忽略毀損快取 */ }
@@ -162,6 +162,7 @@ export function JobSearchView(
 
   async function go(form: FormData) {
     const trailing = companyInput.trim()
+    const resumeLabel = file ? file.name : "貼上的履歷"
     const cs = trailing ? (companies.includes(trailing) ? companies : [...companies, trailing]) : companies
     if (trailing) { setCompanies(cs); setCompanyInput("") }
     if (cs.length) form.append("companies", cs.join(","))
@@ -181,7 +182,11 @@ export function JobSearchView(
       const resp = await fetch("/api/jobs/auto", { method: "POST", body: form, signal: ctrl.signal })
       await readSSE(resp, (ev: JobsAutoEvent) => {
         if (ev.type === "progress") setStatus(ev.message)
-        else if (ev.type === "profile") { acc.profile = ev.data; setProfile(ev.data as UserProfile); onProfile?.(ev.data as UserProfile) }
+        else if (ev.type === "profile") {
+          acc.profile = ev.data
+          setProfile(ev.data as UserProfile)
+          onProfile?.(ev.data as UserProfile, { resumeLabel })
+        }
         else if (ev.type === "queries") { acc.queries = ev.queries; setQueries(ev.queries) }
         else if (ev.type === "source") { acc.sources = mergeSource(acc.sources, ev); setSources((s) => mergeSource(s, ev)) }
         else if (ev.type === "all_blocked") setBlockedNote(ev.message)

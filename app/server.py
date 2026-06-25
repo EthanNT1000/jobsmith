@@ -225,10 +225,6 @@ def resume_evaluate(
         try:
             yield _sse({"type": "progress", "step": "structure", "message": "解析履歷中…"})
             profile = structure_profile(text)
-            try:
-                _memory.save_profile(profile.model_dump())  # 記住最近履歷（跨 session）
-            except Exception:
-                pass
             # 含 raw_text 原文，供使用者接著到「投遞包工作台」手動開跑時帶入本人背景。
             yield _sse({"type": "profile", "data": profile.model_dump()})
             yield _sse({"type": "progress", "step": "evaluate", "message": "健檢評估中…"})
@@ -304,10 +300,6 @@ def jobs_auto(
         try:
             yield _sse({"type": "progress", "step": "structure", "message": "解析履歷中…"})
             profile = structure_profile(text)
-            try:
-                _memory.save_profile(profile.model_dump())  # 記住最近履歷（跨 session）
-            except Exception:
-                pass
             # 把使用者真實履歷（含 raw_text 原文）送給前端，供「產生投遞包」時整包帶入 pipeline，
             # 讓 match/resume/cover/interview agent 拿到逐字履歷（檔案上傳時前端沒有原文，必須由後端帶）。
             yield _sse({"type": "profile", "data": profile.model_dump()})
@@ -770,9 +762,33 @@ class PreferencesBody(BaseModel):
     preferences: dict
 
 
+class ProfileMemoryBody(BaseModel):
+    profile: dict
+
+
 @app.post("/api/memory")
 def memory_post(body: PreferencesBody):
     _memory.save_preferences(body.preferences)
+    return {"ok": True}
+
+
+@app.put("/api/memory/profile")
+def memory_profile_put(body: ProfileMemoryBody):
+    try:
+        profile = Profile(**body.profile)
+        if not (profile.name.strip() or profile.summary.strip()):
+            raise ValueError("profile missing name and summary")
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse(
+            {"error": f"履歷資料無法使用，請重新上傳履歷再試。（{_err_detail(exc)}）"},
+            status_code=400)
+    _memory.save_profile(profile.model_dump())
+    return {"ok": True}
+
+
+@app.delete("/api/memory/profile")
+def memory_profile_delete():
+    _memory.clear_profile()
     return {"ok": True}
 
 

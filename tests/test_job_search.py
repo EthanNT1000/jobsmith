@@ -31,6 +31,19 @@ def test_derive_queries_fallback_to_preferred_role(monkeypatch):
     assert qs == ["資料工程師"]
 
 
+def test_derive_queries_fallback_when_llm_returns_non_json(monkeypatch):
+    class BrokenLLM:
+        def with_structured_output(self, schema):
+            return self
+
+        def invoke(self, messages):
+            raise RuntimeError("Invalid JSON")
+
+    monkeypatch.setattr(mod, "get_llm", lambda tier, **k: BrokenLLM())
+    qs = mod.derive_queries(Profile(name="王", summary="後端", skills=["Python", "FastAPI"], raw_text="r"))
+    assert qs[0] == "Python 後端"
+
+
 def test_rank_jobs_sorts_desc_and_maps(monkeypatch):
     canned = mod._RankResult(rankings=[
         mod._RankItem(index=0, fit_score=40, reason="普通"),
@@ -49,6 +62,26 @@ def test_rank_jobs_sorts_desc_and_maps(monkeypatch):
 
 def test_rank_jobs_empty_returns_empty():
     assert mod.rank_jobs(Profile(name="x", summary="y", raw_text="z"), []) == []
+
+
+def test_rank_jobs_fallback_when_llm_fails(monkeypatch):
+    class BrokenLLM:
+        def with_structured_output(self, schema):
+            return self
+
+        def invoke(self, messages):
+            raise RuntimeError("Invalid JSON")
+
+    monkeypatch.setattr(mod, "get_llm", lambda tier, **k: BrokenLLM())
+    profile = Profile(name="王", summary="後端", skills=["Python"], raw_text="r")
+    jobs = [
+        JobPosting(source="104", title="Python 後端工程師", company="C1", url="u1", snippet="FastAPI Python"),
+        JobPosting(source="104", title="行銷企劃", company="C2", url="u2", snippet="社群內容"),
+    ]
+    out = mod.rank_jobs(profile, jobs)
+    assert out[0].job.title == "Python 後端工程師"
+    assert out[0].fit_score > out[1].fit_score
+    assert "Python" in out[0].matched
 
 
 def test_rank_jobs_stable_tiebreak_by_url(monkeypatch):
