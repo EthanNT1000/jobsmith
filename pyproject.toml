@@ -1,11 +1,11 @@
 [project]
-name = "taiwan-ai-job-copilot"
+name = "jobsmith"
 version = "0.1.0"
 description = "A local-first, multi-agent job-search co-pilot for the Taiwan market — find jobs, audit your résumé, generate tailored application packages, and run mock interviews."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "kevin33335313" }]
+authors = [{ name = "kevin333353" }]
 keywords = ["langgraph", "multi-agent", "job-search", "llm", "taiwan", "resume", "fastapi"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -20,6 +20,7 @@ dependencies = [
     "langgraph>=0.2",
     "langgraph-checkpoint-sqlite>=2.0",
     "langchain-anthropic>=0.2",
+    "langchain-openai>=0.2",
     "langchain-core>=0.3",
     "pydantic>=2.7",
     "python-dotenv>=1.0",
@@ -35,11 +36,12 @@ dependencies = [
 
 [project.optional-dependencies]
 desktop = ["pywebview>=5.0"]
+build = ["pyinstaller>=6.0"]
 dev = ["pytest>=8.0", "ruff>=0.5"]
 
 [project.urls]
-Homepage = "https://github.com/kevin333353/taiwan-ai-job-copilot"
-Repository = "https://github.com/kevin333353/taiwan-ai-job-copilot"
+Homepage = "https://github.com/kevin333353/jobsmith"
+Repository = "https://github.com/kevin333353/jobsmith"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

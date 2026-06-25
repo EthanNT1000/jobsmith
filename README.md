@@ -1,31 +1,49 @@
 <div align="center">
 
-# 台灣 AI 求職 Co-pilot · Taiwan AI Job Co-pilot
+<img src="frontend/public/logo512.png" alt="Jobsmith logo" width="84" height="84" />
 
-**A multi-agent job-search assistant for the Taiwan market — find jobs, audit your résumé, generate tailored application packages, and run mock interviews, end to end.**
+# Jobsmith
 
-Powered by your local **Claude Code / Codex CLI** subscription — no API key required, no API quota consumed.
+**An open-source, multi-agent AI co-pilot for the Taiwan job market.**
 
-**English** · [繁體中文](README.zh-TW.md)
+Find jobs, audit your résumé, and generate tailored application packages — résumé, cover letter, interview prep, and company research — end to end, with a human approval gate.
 
+Runs **locally** on your own **Claude Code / Codex CLI** subscription (no API key, no quota) — or **bring your own key** for any OpenAI-compatible model.
+
+[繁體中文](README.zh-TW.md) · [**Download (Windows)**](#download) · [Quick Start](#quick-start-from-source) · [Architecture](#architecture)
+
+![License](https://img.shields.io/badge/License-MIT-green)
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-multi--agent-1C3C3C)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
-![Tailwind CSS](https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white)
+![Platform](https://img.shields.io/badge/Windows-64--bit-0078D6?logo=windows&logoColor=white)
 
 </div>
 
-> The application UI is in Traditional Chinese, tailored to Taiwan's job-search conventions (104 / Cake / Yourator / LinkedIn).
+> The app UI is in Traditional Chinese, tailored to Taiwan's job-search conventions (104 / Cake / Yourator / LinkedIn). Your résumé and data never leave your machine.
 
-## Quick Start
+---
 
-> **Prerequisites:** Python 3.11+, Node.js 18+, and a logged-in **Claude Code** (`claude`) or **Codex CLI** (`codex`) on your `PATH`.
+## Download
+
+**[⬇ Download Jobsmith for Windows (64-bit)](https://github.com/kevin333353/jobsmith/releases/latest)** — a single `.exe`. No Python or Node.js required.
+
+1. Grab `Jobsmith.exe` from the [latest release](https://github.com/kevin333353/jobsmith/releases/latest).
+2. Double-click it. A native window opens (the first launch unpacks for ~10–30s).
+3. In the **top-right control panel**, choose your AI engine:
+   - **Local CLI** — a logged-in **Claude Code** (`claude`) or **Codex CLI** (`codex`) on your `PATH`, **or**
+   - **BYOK** — `base_url` + `api_key` + `model` for any OpenAI-compatible endpoint (OpenAI, DeepSeek, Gemini, Groq, OpenRouter, Ollama, LM Studio, vLLM…).
+
+> **Requirements:** Windows 10/11 (64-bit; WebView2 is built into Windows 11). Your history, settings, and `.env` are saved next to the `.exe` — nothing is uploaded.
+
+## Quick Start (from source)
+
+> **Prerequisites:** Python 3.11+, Node.js 18+, and a logged-in **Claude Code** (`claude`) or **Codex CLI** (`codex`) on your `PATH` (or a BYOK key).
 
 ```bash
-git clone https://github.com/kevin333353/taiwan-ai-job-copilot.git
-cd taiwan-ai-job-copilot
+git clone https://github.com/kevin333353/jobsmith.git
+cd jobsmith
 
 setup.bat            # Windows  — one-time setup (venv + deps + frontend build)
 # ./setup.sh         # macOS / Linux / Git Bash
@@ -34,19 +52,18 @@ desktop.bat          # launch as a native desktop window (recommended)
 # run.bat            # or web mode → http://localhost:8000
 ```
 
-### Running modes
-
 | Mode             | Command                                                        | Notes                                                              |
 | ---------------- | ------------------------------------------------------------- | ----------------------------------------------------------------- |
-| **Desktop app**  | `desktop.bat` (or `python desktop.py`)                        | Native window; first run shows a backend picker + connection test. |
+| **Desktop app**  | `desktop.bat` (or `python desktop.py`)                        | Native window; first run shows a backend picker.                   |
 | **Web**          | `run.bat` (or `python -m uvicorn app.server:app --port 8000`) | Open <http://localhost:8000>.                                     |
 | **CLI (one JD)** | `python -m app.cli data/demo_jobs/ai_engineer.txt`           | Headless single-JD run.                                            |
 
-> Switch backend anytime from the onboarding screen or the top-right selector.
+To build your own `.exe`: `pip install pyinstaller && pyinstaller jobsmith.spec --noconfirm` → `dist/Jobsmith.exe`.
 
 ## Table of Contents
 
-- [Quick Start](#quick-start)
+- [Download](#download)
+- [Quick Start](#quick-start-from-source)
 - [Features](#features)
 - [LLM Backends](#llm-backends)
 - [Architecture](#architecture)
@@ -61,17 +78,16 @@ desktop.bat          # launch as a native desktop window (recommended)
 
 ## Features
 
-- **Auto job search** — paste or upload a résumé; the system derives keywords, searches 104 / Yourator / LinkedIn / Cake **in parallel**, and ranks results by fit in **streaming batches** (results appear as they are scored). Includes an adjustable "≥ N score" slider, pagination, and a per-company section for employers you name explicitly.
-- **Skill-gap analysis** — aggregates the in-demand skills across matched jobs and contrasts them with your résumé to surface real gaps.
-- **Search history** — every search is auto-saved (AI picks + named-company jobs + skill gap); revisit, regenerate a package, or delete. No more losing a great match to a re-run.
+- **Auto job search** — paste or upload a résumé; the system derives keywords and searches 104 / Yourator / LinkedIn / Cake **in parallel**, ranking by fit in **streaming batches** (results appear as they're scored). Pick your **region(s) before searching** (applied at-source on 104, result-side on the others), filter by **fit band** (high / mid-and-up / all), set pages per source, and track named companies in a separate section.
+- **Search history** — every search is auto-saved; revisit it, regenerate a package, or delete it.
 - **Résumé health check** — scores against Taiwan ATS conventions with concrete fixes and before/after rewrites.
-- **Application-package workbench** — a multi-agent pipeline (parse JD → match score → company research → tailored résumé → cover letter → interview kit → critique) with a **human approval gate**. Outputs are editable inline and exportable to **Word (.docx)** (PDF via your browser's print dialog), then auto-saved.
-- **Mock interview** — generates questions from the JD and your résumé, with per-answer feedback, scores, and a final summary.
-- **Personalization** — remembers your most recent résumé (no re-upload) and preferences (target titles, tone, skills to emphasize) across sessions and applies them to outputs.
+- **Application-package workbench** — a multi-agent pipeline (parse JD → match score → company research → tailored résumé → cover letter → interview kit → critique) with a **human approval gate** and a live agent-orchestration trace. Documents are **editable inline**, you can **discuss changes with the AI** per document, and export to **Word (.docx)** (PDF via the browser's print dialog).
+- **Mock interview** — generates questions from the JD and your résumé, with per-answer feedback and scores; launchable directly from an approved package.
+- **Personalization** — remembers your most recent résumé (no re-upload) and preferences (target titles, tone, skills to emphasize) across sessions, and applies them to outputs.
 
 ## LLM Backends
 
-Pick your AI engine from the **top-right control panel** — a **local CLI subscription** (no API key) or **BYOK** (any OpenAI-compatible endpoint). Selecting a backend takes effect immediately; the **Test** button is an optional connection check, never a gate. Local CLIs have a **rescan** action and a **selectable model**.
+Pick your AI engine from the **top-right control panel** — a **local CLI subscription** (no API key) or **BYOK** (any OpenAI-compatible endpoint). Selecting a backend takes effect immediately; the **Test** button is an optional connection check, never a gate. Local CLIs offer a **rescan** action and a **selectable model**.
 
 | Backend      | Auth                                   | Notes                                                                                                    |
 | ------------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -100,7 +116,7 @@ React SPA (Vite)  ──HTTP/SSE──►  FastAPI
 - A LangGraph `StateGraph` orchestrates the agents; `SqliteSaver` persists checkpoints and powers the human-in-the-loop approval gate via `interrupt()` / `Command(resume=…)`.
 - The server streams progress to the browser over **Server-Sent Events**.
 - An application-level SQLite database (separate from the LangGraph checkpoint store) holds package history, user memory, and saved searches.
-- Models are tiered automatically: **haiku** for extraction, **sonnet** for matching/generation, **opus** for the Critic/Supervisor.
+- On the CLI backends, models are tiered automatically: **haiku** for extraction, **sonnet** for matching/generation, **opus** for the Critic/Supervisor (overridable per backend).
 
 ## Evaluation
 
@@ -123,19 +139,19 @@ The `summarize()` step is a pure function with its own unit tests, so the aggreg
 
 ## Tech Stack
 
-| Layer    | Technologies                                                             |
-| -------- | ------------------------------------------------------------------------ |
-| Backend  | Python, FastAPI, LangGraph, LangChain, Pydantic v2, SQLite, BeautifulSoup |
-| Frontend | React 19, TypeScript, Vite, Tailwind CSS, lucide-react                    |
+| Layer    | Technologies                                                               |
+| -------- | -------------------------------------------------------------------------- |
+| Backend  | Python, FastAPI, LangGraph, LangChain, Pydantic v2, SQLite, BeautifulSoup  |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS, lucide-react                     |
 | LLM      | Claude Code CLI / Codex CLI (local) · any OpenAI-compatible endpoint (BYOK) |
-| Desktop  | pywebview (native window over the local server)                          |
+| Desktop  | pywebview (native window) · PyInstaller (single-file `.exe`)               |
 
 ## Project Structure
 
 ```
 app/
-  agents/     # résumé eval, job search, company research, skill gap, interview sim, …
-  sources/    # 104 / Yourator / LinkedIn / Cake search + registry
+  agents/     # résumé eval, job search, company research, refine chat, interview sim, …
+  sources/    # 104 / Yourator / LinkedIn / Cake search + registry + region map
   store/      # app-level SQLite: history, memory, searches
   intake/     # résumé/JD parsing and fetching
   export/     # Word (.docx) export
@@ -144,21 +160,23 @@ app/
   llm.py      # pluggable LLM backend resolution
 frontend/     # Vite + React + TS + Tailwind SPA
 tests/        # pytest suite
-data/         # demo profiles/jobs, fallback data
+desktop.py    # native-window launcher    jobsmith.spec  # PyInstaller build
 ```
 
 ## Testing
 
 ```bash
-pytest                # unit/integration suite (live API tests skipped by default)
-pytest -m live        # include tests that call the real API
+pytest                         # unit/integration suite (live API tests skipped by default)
+pytest -m live                 # include tests that call the real API
 cd frontend && npm run build   # type-check + production build
 ```
 
 ## Roadmap
 
-- [ ] Single-file desktop binary (PyInstaller) for non-developers
-- [ ] Hosted (bring-your-own-API-key) deployment mode
+- [x] Single-file Windows desktop app (PyInstaller)
+- [x] BYOK — any OpenAI-compatible backend
+- [ ] **Batch queue** — generate packages for multiple jobs with sequential auto-advance (v0.2)
+- [ ] macOS / Linux builds
 - [ ] More job sources
 
 ## Contributing
