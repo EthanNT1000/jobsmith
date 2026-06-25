@@ -27,6 +27,12 @@ _TIMEOUT = 300
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
+def _safe_arg(text: str) -> str:
+    """移除 NUL：含 \\x00 的字串當 subprocess 參數會直接 ValueError("embedded null byte")。
+    履歷/JD 等外部文字（UTF-16 .txt、某些 PDF 抽取）偶有殘留，作為邊界防線一律先清掉。"""
+    return (text or "").replace("\x00", "")
+
+
 def _messages_to_prompt(messages) -> tuple[str, str]:
     """把 [(role, content), ...] 拆成 (system, human) 兩段合併字串。"""
     system_parts, human_parts = [], []
@@ -133,7 +139,7 @@ def _run_claude(prompt: str, model: str, allowed_tools: list[str] | None = None,
         raise RuntimeError("找不到 claude CLI，請確認已安裝並在 PATH。")
     env = {k: v for k, v in os.environ.items()
            if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
-    args = [exe, "-p", prompt, "--output-format", "json", "--model", model]
+    args = [exe, "-p", _safe_arg(prompt), "--output-format", "json", "--model", model]
     if allowed_tools:
         args += ["--allowedTools", *allowed_tools]
     proc = subprocess.run(
@@ -222,7 +228,7 @@ def _run_codex(prompt: str, timeout: int = _TIMEOUT, extra_args: list[str] | Non
         out_file = Path(td) / "last.txt"
         # -o 為 --output-last-message 短旗標：把模型最終訊息寫入檔案，避免混入 agent log
         args = [exe, "exec", "--skip-git-repo-check", "-s", "read-only",
-                "-o", str(out_file), *(extra_args or []), prompt]
+                "-o", str(out_file), *(extra_args or []), _safe_arg(prompt)]
         proc = subprocess.run(
             args, input="", capture_output=True, text=True, encoding="utf-8",
             env=env, timeout=timeout, creationflags=_NO_WINDOW,

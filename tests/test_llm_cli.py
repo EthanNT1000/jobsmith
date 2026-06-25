@@ -123,3 +123,41 @@ def test_codex_structured_parses(monkeypatch):
     monkeypatch.setattr(cli, "_run_codex", lambda prompt, extra_args=None: '{"name": "c", "score": 5}')
     out = cli.CodexCLIChat().with_structured_output(Toy).invoke([("human", "h")])
     assert out.name == "c" and out.score == 5
+
+
+def test_run_claude_strips_null_bytes_from_prompt(monkeypatch):
+    # 履歷/JD 偶有殘留 \x00（UTF-16 .txt、某些 PDF）；直接進 subprocess 會丟 ValueError("embedded null byte")，
+    # 這正是「一按搜尋就 AI 服務暫時無法使用（ValueError）」的根因。送進 args 的 prompt 必須先清掉。
+    seen = {}
+
+    class FakeProc:
+        returncode = 0
+        stdout = json.dumps({"is_error": False, "result": "ok"})
+        stderr = ""
+
+    def fake_run(args, **kwargs):
+        seen["args"] = args
+        return FakeProc()
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "claude")
+    cli._run_claude("履歷\x00內容\x00殘留", "haiku")
+    assert all("\x00" not in a for a in seen["args"])
+
+
+def test_run_codex_strips_null_bytes_from_prompt(monkeypatch):
+    seen = {}
+
+    class FakeProc:
+        returncode = 0
+        stdout = "{}"
+        stderr = ""
+
+    def fake_run(args, **kwargs):
+        seen["args"] = args
+        return FakeProc()
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "codex")
+    cli._run_codex("JD\x00內容\x00殘留")
+    assert all("\x00" not in a for a in seen["args"])
