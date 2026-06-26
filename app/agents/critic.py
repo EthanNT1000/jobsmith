@@ -1,7 +1,11 @@
 """⑥ 品管/反思 Agent：對投遞包評分並給修改指示。"""
 from app.llm import get_llm
 from app.models import (
-    ParsedJob, TailoredResume, CoverLetter, InterviewKit, CritiqueReport,
+    CoverLetter,
+    CritiqueReport,
+    InterviewKit,
+    ParsedJob,
+    TailoredResume,
 )
 
 CRITIC_SYSTEM = (

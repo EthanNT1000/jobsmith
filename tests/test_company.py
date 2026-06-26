@@ -1,7 +1,7 @@
 import pytest
 
-from app.models import CompanyBrief
 from app.agents import company as company_mod
+from app.models import CompanyBrief
 from tests.conftest import FakeLLM
 
 

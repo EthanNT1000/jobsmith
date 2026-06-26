@@ -1,5 +1,5 @@
-from app.models import InterviewKit, CompanyBrief
 from app.agents import interview as iv_mod
+from app.models import CompanyBrief, InterviewKit
 from tests.conftest import FakeLLM
 
 

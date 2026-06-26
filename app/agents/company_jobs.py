@@ -4,9 +4,9 @@
 """
 from __future__ import annotations
 
-from app.sources.registry import search_all
 from app.llm import research_structured
 from app.models import JobPosting, JobPostingList
+from app.sources.registry import search_all
 
 _BOARD_SOURCES = {"104", "yourator", "linkedin", "cake"}
 

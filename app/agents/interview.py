@@ -1,6 +1,6 @@
 """⑤ 面試準備 Agent。"""
 from app.llm import get_llm
-from app.models import ParsedJob, Profile, CompanyBrief, InterviewKit
+from app.models import CompanyBrief, InterviewKit, ParsedJob, Profile
 
 INTERVIEW_SYSTEM = (
     "你是面試教練。請依職缺與求職者背景，準備面試包："

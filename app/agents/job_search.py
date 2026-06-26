@@ -165,7 +165,7 @@ def rank_jobs(profile: Profile, jobs: list[JobPosting], top_k: int | None = None
         f"[{i}] {j.title} @ {j.company}｜{j.location or ''}｜{(j.snippet or '')[:120]}"
         for i, j in enumerate(jobs)
     )
-    llm = get_llm("standard", max_tokens=4000).with_structured_output(_RankResult)
+    llm = get_llm("standard", max_tokens=4000, timeout=90).with_structured_output(_RankResult)
     human = f"【求職者】\n{_profile_brief(profile)}\n\n【職缺清單】\n{listing}"
     try:
         out = llm.invoke([("system", RANK_SYSTEM), ("human", human)])

@@ -1,4 +1,4 @@
-from app.sources import source_104, source_yourator, source_cake, source_linkedin
+from app.sources import source_104, source_cake, source_linkedin, source_yourator
 
 
 class FakeResp:
@@ -234,8 +234,8 @@ def test_source_linkedin_blocked_on_error(monkeypatch):
 
 
 def test_registry_search_all_aggregates(monkeypatch):
-    from app.sources import registry
     from app.models import SearchResult
+    from app.sources import registry
     monkeypatch.setattr(registry, "SEARCHABLE", {
         "104": lambda kw, limit=15, pages=1, area=None: SearchResult(source="104"),
         "yourator": lambda kw, limit=15, pages=1, area=None: SearchResult(source="yourator"),
@@ -246,8 +246,8 @@ def test_registry_search_all_aggregates(monkeypatch):
 
 def test_registry_search_all_passes_pages(monkeypatch):
     """search_all 應把 pages 下傳給各來源。"""
-    from app.sources import registry
     from app.models import SearchResult
+    from app.sources import registry
     seen = {}
 
     def fake(kw, limit=15, pages=1, area=None):
@@ -266,6 +266,7 @@ def test_all_real_sources_accept_area_param():
     # 任一來源的 search() 漏掉 area，每次搜尋都會丟 TypeError → 被當成 blocked
     # （LinkedIn 曾因此每次都顯示「暫無」）。確保所有真實來源都吃得下 area。
     import inspect
+
     from app.sources import registry
     for name, fn in registry.SEARCHABLE.items():
         params = list(inspect.signature(fn).parameters)

@@ -1,7 +1,7 @@
 import pytest
 
-from app.evals.harness import summarize, run_case
 from app.evals.fixtures import GOLDEN
+from app.evals.harness import run_case, summarize
 from app.models import CritiqueReport
 
 

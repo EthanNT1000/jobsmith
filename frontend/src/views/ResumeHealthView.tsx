@@ -1,14 +1,24 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { ChangeEvent } from "react"
 import type { ResumeAssessment, UserProfile, SSEEvent } from "../types"
 import { readSSE } from "../sse"
+import { newTaskId, stopTask } from "../lib/taskControl"
 import { SAMPLE_RESUME } from "../sampleResume"
 import { Dashboard } from "../components/Dashboard"
 import { Card } from "../ui/Card"
 import { Button } from "../ui/Button"
 import { Skeleton } from "../ui/Skeleton"
 import { EmptyState } from "../ui/EmptyState"
-import { Gauge, Upload, Loader2 } from "../ui/icons"
+import { Gauge, Upload, Loader2, Timer, ListChecks, XCircle } from "../ui/icons"
+
+const RESUME_HEALTH_WAIT_HINT = "深度健檢通常需要 30 秒到 2 分鐘，長履歷或 CLI 模型可能更久。"
+
+function formatElapsed(seconds: number) {
+  if (seconds < 60) return `${seconds} 秒`
+  const minutes = Math.floor(seconds / 60)
+  const rest = seconds % 60
+  return rest ? `${minutes} 分 ${rest} 秒` : `${minutes} 分`
+}
 
 export function ResumeHealthView(
   { onProfile }: { onProfile?: (p: UserProfile, meta?: { label?: string; resumeLabel?: string }) => void },
@@ -16,26 +26,67 @@ export function ResumeHealthView(
   const [text, setText] = useState("")
   const [status, setStatus] = useState("")
   const [busy, setBusy] = useState(false)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [assessment, setAssessment] = useState<ResumeAssessment | null>(null)
   const [error, setError] = useState("")
+  const abortRef = useRef<AbortController | null>(null)
+  const taskIdRef = useRef("")
+  const stoppingRef = useRef(false)
+
+  useEffect(() => {
+    if (!busy) return
+    const id = window.setInterval(() => setElapsedSeconds((s) => s + 1), 1000)
+    return () => window.clearInterval(id)
+  }, [busy])
 
   async function evaluate(form: FormData, resumeLabel: string) {
-    setBusy(true); setError(""); setAssessment(null); setStatus("上傳中…")
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    const taskId = newTaskId("resume-health")
+    abortRef.current = ctrl
+    taskIdRef.current = taskId
+    stoppingRef.current = false
+    form.append("task_id", taskId)
+    setBusy(true); setError(""); setAssessment(null)
+    setElapsedSeconds(0)
+    setStatus(`上傳中…${RESUME_HEALTH_WAIT_HINT}`)
     try {
-      const resp = await fetch("/api/resume/evaluate", { method: "POST", body: form })
+      const resp = await fetch("/api/resume/evaluate", { method: "POST", body: form, signal: ctrl.signal })
       await readSSE(resp, (ev: SSEEvent) => {
         if (ev.type === "progress") setStatus(ev.message)
         else if (ev.type === "profile") {
           onProfile?.(ev.data as UserProfile, { resumeLabel })  // 本次 session 共用，跨 session 需手動儲存 Profile
         }
         else if (ev.type === "assessment") setAssessment(ev.data as ResumeAssessment)
+        else if (ev.type === "stopped") { stoppingRef.current = true; setStatus(ev.message || "已停止健檢") }
         else if (ev.type === "error") setError(ev.message)
-        else if (ev.type === "done") setStatus("完成 ✅")
+        else if (ev.type === "done") setStatus("完成")
       })
-    } catch {
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") return
       setError("連線發生問題，請確認伺服器是否啟動。")
     } finally {
+      if (abortRef.current === ctrl) {
+        setBusy(false)
+        abortRef.current = null
+        taskIdRef.current = ""
+        if (stoppingRef.current) setStatus("已停止健檢")
+        stoppingRef.current = false
+      }
+    }
+  }
+
+  async function stopEvaluate() {
+    stoppingRef.current = true
+    setStatus("正在停止健檢…")
+    try {
+      await stopTask(taskIdRef.current)
+    } catch {
+      // 即使停止請求失敗，仍中止目前前端串流，避免畫面卡住。
+    } finally {
+      abortRef.current?.abort()
       setBusy(false)
+      setStatus("已停止健檢")
     }
   }
 
@@ -66,14 +117,17 @@ export function ResumeHealthView(
         />
         <div className="flex flex-wrap gap-2 mt-3 items-center">
           <Button onClick={onSubmitText} loading={busy} icon={Gauge}>開始健檢</Button>
+          {busy && <Button variant="danger" onClick={stopEvaluate} icon={XCircle}>停止</Button>}
           <Button variant="secondary" onClick={() => setText(SAMPLE_RESUME)} disabled={busy}>載入範例履歷</Button>
           <label className={`inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg font-medium border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition cursor-pointer focus-within:ring-2 focus-within:ring-brand-300 ${busy ? "opacity-50 pointer-events-none" : ""}`}>
             <Upload className="w-4 h-4" />上傳檔案（PDF/DOCX/TXT）
             <input type="file" accept=".pdf,.docx,.txt" className="sr-only" onChange={onFile} disabled={busy} />
           </label>
-          {busy && status && (
-            <span className="text-sm text-slate-500 inline-flex items-center gap-1">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />{status}
+          {busy && (
+            <span className="text-sm text-slate-500 inline-flex items-center gap-1.5">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>{status || "準備中…"}</span>
+              <span className="text-slate-400">已等待 {formatElapsed(elapsedSeconds)}</span>
             </span>
           )}
         </div>
@@ -82,12 +136,46 @@ export function ResumeHealthView(
 
       {busy && !assessment && (
         <div className="space-y-6">
-          <Card className="p-6 flex items-center gap-6">
-            <Skeleton className="w-28 h-28 rounded-full" />
-            <div className="flex-1 space-y-2">
-              <Skeleton className="h-5 w-40" />
+          <Card className="p-6">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+              <div className="h-12 w-12 shrink-0 rounded-lg bg-brand-50 text-brand-700 grid place-items-center">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-lg font-semibold text-slate-900">正在進行履歷健檢</h2>
+                  <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">
+                    <Timer className="h-3.5 w-3.5" />已等待 {formatElapsed(elapsedSeconds)}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-slate-600">{status || "準備中…"}</p>
+                <p className="mt-1 text-sm text-slate-500">{RESUME_HEALTH_WAIT_HINT}</p>
+              </div>
+              <Button variant="danger" onClick={stopEvaluate} icon={XCircle}>停止</Button>
+            </div>
+            <div className="mt-5 grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <ListChecks className="h-4 w-4 text-brand-600" />解析背景
+                </div>
+                <p className="mt-1 text-xs text-slate-500">整理姓名、定位、技能與經歷。</p>
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <Gauge className="h-4 w-4 text-brand-600" />深度評分
+                </div>
+                <p className="mt-1 text-xs text-slate-500">檢查 ATS、量化成果與台灣履歷慣例。</p>
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <Loader2 className="h-4 w-4 text-brand-600" />整理報告
+                </div>
+                <p className="mt-1 text-xs text-slate-500">產出問題清單與改寫範例。</p>
+              </div>
+            </div>
+            <div className="mt-5 space-y-2">
               <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-2/3" />
+              <Skeleton className="h-4 w-4/5" />
             </div>
           </Card>
         </div>

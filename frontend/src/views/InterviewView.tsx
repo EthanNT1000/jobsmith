@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { CandidateProfile, UserProfile, InterviewQuestion, AnswerFeedback, InterviewSummary, Seed } from "../types"
 import { profileDisplayName } from "../lib/profiles"
+import { newTaskId, stopTask } from "../lib/taskControl"
 import { Card } from "../ui/Card"
 import { Button } from "../ui/Button"
 import { Badge } from "../ui/Badge"
@@ -8,7 +9,7 @@ import { EmptyState } from "../ui/EmptyState"
 import { ScoreRing } from "../components/ScoreRing"
 import {
   MessagesSquare, CheckCircle2, AlertTriangle, RefreshCw, ArrowRight, Archive, Loader2, X,
-  UserRound,
+  UserRound, XCircle,
 } from "../ui/icons"
 
 interface PkgPick {
@@ -50,10 +51,41 @@ export function InterviewView(
   const [currentKey, setCurrentKey] = useState<string | null>(null)
   const [packages, setPackages] = useState<PkgPick[]>([])
   const [manualJd, setManualJd] = useState("")
+  const taskRefs = useRef<Record<string, { taskId: string; ctrl: AbortController }>>({})
 
   const cur = sessions.find((s) => s.key === currentKey) || null
   const patch = (key: string, p: Partial<Session>) =>
     setSessions((ss) => ss.map((s) => (s.key === key ? { ...s, ...p } : s)))
+
+  function startTask(key: string, prefix: string) {
+    const previous = taskRefs.current[key]
+    if (previous) {
+      void stopTask(previous.taskId).catch(() => undefined)
+      previous.ctrl.abort()
+    }
+    const ctrl = new AbortController()
+    const taskId = newTaskId(`${prefix}-${key.replace(/[^a-zA-Z0-9_-]/g, "")}`)
+    taskRefs.current[key] = { taskId, ctrl }
+    return { taskId, ctrl }
+  }
+
+  function finishTask(key: string, ctrl: AbortController) {
+    if (taskRefs.current[key]?.ctrl === ctrl) delete taskRefs.current[key]
+  }
+
+  async function stopSessionTask(key: string) {
+    const current = taskRefs.current[key]
+    if (!current) return
+    try {
+      await stopTask(current.taskId)
+    } catch {
+      // 停止端點失敗時仍中止前端等待。
+    } finally {
+      current.ctrl.abort()
+      delete taskRefs.current[key]
+      patch(key, { loading: false, busy: false, error: "已停止任務" })
+    }
+  }
 
   async function loadPackages() {
     try {
@@ -68,18 +100,26 @@ export function InterviewView(
       loading: true, error: "", jd, profile,
       questions: [], idx: 0, answer: "", feedback: null, transcript: [], summary: null,
     })
+    const { taskId, ctrl } = startTask(key, "interview-start")
     try {
       const r = await fetch("/api/interview/start", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jd_text: jd, profile }),
+        signal: ctrl.signal,
+        body: JSON.stringify({ jd_text: jd, profile, task_id: taskId }),
       })
       const d = await r.json()
       if (!r.ok) { patch(key, { loading: false, error: d.error || "啟動失敗" }); return }
       const qs: InterviewQuestion[] = d.questions || []
       if (!qs.length) { patch(key, { loading: false, error: "AI 暫時無法出題，請稍後再試或換一份 JD。" }); return }
       patch(key, { loading: false, questions: qs })
-    } catch {
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") {
+        patch(key, { loading: false, error: "已停止任務" })
+        return
+      }
       patch(key, { loading: false, error: "連線發生問題，請確認伺服器是否啟動。" })
+    } finally {
+      finishTask(key, ctrl)
     }
   }
 
@@ -109,6 +149,7 @@ export function InterviewView(
   }
 
   function closeSession(key: string) {
+    void stopSessionTask(key)
     setSessions((ss) => ss.filter((s) => s.key !== key))
     if (currentKey === key) setCurrentKey(null)
   }
@@ -124,11 +165,16 @@ export function InterviewView(
     if (!cur || !cur.answer.trim() || cur.busy) return
     const key = cur.key
     patch(key, { busy: true, error: "" })
+    const { taskId, ctrl } = startTask(key, "interview-answer")
     try {
       const q = cur.questions[cur.idx]
       const r = await fetch("/api/interview/answer", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jd_text: cur.jd, question: q.question, answer: cur.answer, profile: cur.profile }),
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          jd_text: cur.jd, question: q.question, answer: cur.answer,
+          profile: cur.profile, task_id: taskId,
+        }),
       })
       const d = await r.json()
       if (!r.ok) { patch(key, { busy: false, error: d.error || "評分失敗" }); return }
@@ -136,8 +182,14 @@ export function InterviewView(
         busy: false, feedback: d as AnswerFeedback,
         transcript: [...cur.transcript, { question: q.question, answer: cur.answer, score: (d as AnswerFeedback).score }],
       })
-    } catch {
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") {
+        patch(key, { busy: false, error: "已停止任務" })
+        return
+      }
       patch(key, { busy: false, error: "連線發生問題。" })
+    } finally {
+      finishTask(key, ctrl)
     }
   }
 
@@ -148,16 +200,28 @@ export function InterviewView(
       patch(key, { idx: cur.idx + 1, answer: "", feedback: null }); return
     }
     patch(key, { busy: true, error: "" })
+    const { taskId, ctrl } = startTask(key, "interview-summary")
     try {
       const r = await fetch("/api/interview/summary", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jd_text: cur.jd, transcript: cur.transcript.map((t) => ({ question: t.question, answer: t.answer })) }),
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          jd_text: cur.jd,
+          transcript: cur.transcript.map((t) => ({ question: t.question, answer: t.answer })),
+          task_id: taskId,
+        }),
       })
       const d = await r.json()
       if (!r.ok) { patch(key, { busy: false, error: d.error || "總評失敗" }); return }
       patch(key, { busy: false, summary: d as InterviewSummary })
-    } catch {
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") {
+        patch(key, { busy: false, error: "已停止任務" })
+        return
+      }
       patch(key, { busy: false, error: "連線發生問題。" })
+    } finally {
+      finishTask(key, ctrl)
     }
   }
 
@@ -267,6 +331,7 @@ export function InterviewView(
           <div className="flex flex-col items-center gap-3 text-slate-500">
             <Loader2 className="w-7 h-7 animate-spin text-brand-500" />
             <p className="text-sm">AI 面試官正在依「{cur.title}」這份職缺出題…</p>
+            <Button variant="danger" icon={XCircle} onClick={() => stopSessionTask(cur.key)}>停止</Button>
           </div>
         </Card>
       </div>
@@ -318,7 +383,13 @@ export function InterviewView(
       {tabs}
       <div className="flex items-center justify-between">
         <span className="text-sm text-slate-500">{cur.title}｜第 {cur.idx + 1} / {cur.questions.length} 題</span>
-        <Button variant="ghost" size="sm" icon={RefreshCw} onClick={() => beginQuestions(cur.key, cur.jd, cur.profile)}>重新開始</Button>
+        <div className="flex items-center gap-2">
+          {cur.busy && <Button variant="danger" size="sm" icon={XCircle} onClick={() => stopSessionTask(cur.key)}>停止</Button>}
+          <Button variant="ghost" size="sm" icon={RefreshCw} disabled={cur.busy}
+            onClick={() => beginQuestions(cur.key, cur.jd, cur.profile)}>
+            重新開始
+          </Button>
+        </div>
       </div>
       <Card className="p-5">
         <div className="flex items-center gap-2 mb-2">
@@ -335,6 +406,7 @@ export function InterviewView(
             placeholder="輸入你的回答…" value={cur.answer} onChange={(e) => setAnswer(e.target.value)} />
           <div className="mt-3">
             <Button onClick={submitAnswer} loading={cur.busy} disabled={!cur.answer.trim()} icon={CheckCircle2}>送出回答</Button>
+            {cur.busy && <Button variant="danger" icon={XCircle} onClick={() => stopSessionTask(cur.key)} className="ml-2">停止</Button>}
           </div>
         </Card>
       ) : (
@@ -359,6 +431,7 @@ export function InterviewView(
             <Button onClick={next} loading={cur.busy} icon={ArrowRight}>
               {cur.idx < cur.questions.length - 1 ? "下一題" : "看總評"}
             </Button>
+            {cur.busy && <Button variant="danger" icon={XCircle} onClick={() => stopSessionTask(cur.key)} className="ml-2">停止</Button>}
           </div>
         </Card>
       )}

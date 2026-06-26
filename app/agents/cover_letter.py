@@ -1,6 +1,6 @@
 """④ 求職信/自傳 Agent。"""
 from app.llm import get_llm
-from app.models import ParsedJob, Profile, CompanyBrief, CoverLetter
+from app.models import CompanyBrief, CoverLetter, ParsedJob, Profile
 
 COVER_SYSTEM = (
     "你是求職文案專家。請以台灣求職文化撰寫一封繁中求職信/自傳，"

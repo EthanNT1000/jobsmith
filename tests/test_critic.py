@@ -1,7 +1,11 @@
-from app.models import (
-    ParsedJob, TailoredResume, CoverLetter, InterviewKit, CritiqueReport,
-)
 from app.agents import critic as critic_mod
+from app.models import (
+    CoverLetter,
+    CritiqueReport,
+    InterviewKit,
+    ParsedJob,
+    TailoredResume,
+)
 from tests.conftest import FakeLLM
 
 

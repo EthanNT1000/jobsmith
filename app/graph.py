@@ -10,25 +10,30 @@ import sqlite3
 import time
 from pathlib import Path
 
-from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from app import telemetry
-from app.state import CopilotState
-from app.agents.parse import parse_job
-from app.agents.match import match_profile
 from app.agents.company import research_company
-from app.agents.resume import tailor_resume
 from app.agents.cover_letter import write_cover_letter
-from app.agents.interview import prepare_interview
 from app.agents.critic import critique_package
-from app.agents.supervisor import supervise_after_match, supervise_after_critic
-
+from app.agents.interview import prepare_interview
+from app.agents.match import match_profile
+from app.agents.parse import parse_job
+from app.agents.resume import tailor_resume
+from app.agents.supervisor import supervise_after_critic, supervise_after_match
 from app.models import (
-    ParsedJob, MatchReport, CompanyBrief, TailoredResume, CoverLetter, InterviewKit,
-    CritiqueReport, SupervisorDecision,
+    CompanyBrief,
+    CoverLetter,
+    CritiqueReport,
+    InterviewKit,
+    MatchReport,
+    ParsedJob,
+    SupervisorDecision,
+    TailoredResume,
 )
+from app.state import CopilotState
 
 MAX_REVISIONS = 3  # 最多評審次數（至多 2 次重寫），防無限迴圈
 _DOC_PASS = 75     # 安全網：per_doc 未指明時，分數低於此者視為需重寫

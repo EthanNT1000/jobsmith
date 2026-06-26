@@ -1,5 +1,5 @@
-from app.models import CoverLetter, CompanyBrief
 from app.agents import cover_letter as cl_mod
+from app.models import CompanyBrief, CoverLetter
 from tests.conftest import FakeLLM
 
 

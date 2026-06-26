@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.models import Profile, ParsedJob, MatchReport
+from app.models import MatchReport, ParsedJob, Profile
 
 
 def test_profile_minimal_valid():
@@ -52,7 +52,7 @@ def test_match_report_score_lower_bound():
         MatchReport(score=-1, recommend_proceed=False, reason="負分非法")
 
 
-from app.models import CompanyBrief, TailoredResume, CoverLetter, InterviewKit
+from app.models import CompanyBrief, CoverLetter, InterviewKit, TailoredResume
 
 
 def test_company_brief_minimal_and_defaults():
@@ -91,7 +91,7 @@ def test_critique_report_score_bounds():
         CritiqueReport(resume_score=101, cover_letter_score=0, interview_score=0, overall_pass=False)
 
 
-from app.models import ResumeIssue, ResumeRewrite, ResumeAssessment
+from app.models import ResumeAssessment, ResumeIssue, ResumeRewrite
 
 
 def test_resume_assessment_round_trips():

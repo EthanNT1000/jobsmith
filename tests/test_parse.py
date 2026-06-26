@@ -1,5 +1,5 @@
-from app.models import ParsedJob
 from app.agents import parse as parse_mod
+from app.models import ParsedJob
 from tests.conftest import FakeLLM
 
 
@@ -32,8 +32,9 @@ def test_parse_job_uses_cheap_tier(monkeypatch):
     assert seen["tier"] == "cheap"
 
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 
 @pytest.mark.live

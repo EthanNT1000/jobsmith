@@ -4,6 +4,7 @@ import pytest
 from pydantic import BaseModel
 
 import app.llm_cli as cli
+from app.llm_errors import LLMResponseFormatError
 
 
 class Toy(BaseModel):
@@ -53,7 +54,7 @@ def test_claude_structured_repairs_validation_error(monkeypatch):
     prompts = []
     calls = {"n": 0}
 
-    def runner(prompt, model):
+    def runner(prompt, model, timeout=None):
         prompts.append(prompt)
         calls["n"] += 1
         return '{"name": "x"}' if calls["n"] == 1 else '{"name": "x", "score": 9}'
@@ -65,7 +66,7 @@ def test_claude_structured_repairs_validation_error(monkeypatch):
 
 
 def test_claude_structured_parses(monkeypatch):
-    monkeypatch.setattr(cli, "_run_claude", lambda prompt, model: '{"name": "王", "score": 88}')
+    monkeypatch.setattr(cli, "_run_claude", lambda prompt, model, timeout=None: '{"name": "王", "score": 88}')
     llm = cli.ClaudeCLIChat("opus")
     out = llm.with_structured_output(Toy).invoke([("system", "s"), ("human", "h")])
     assert isinstance(out, Toy)
@@ -75,7 +76,7 @@ def test_claude_structured_parses(monkeypatch):
 def test_claude_structured_retries_then_succeeds(monkeypatch):
     calls = {"n": 0}
 
-    def runner(prompt, model):
+    def runner(prompt, model, timeout=None):
         calls["n"] += 1
         return "亂碼非 JSON" if calls["n"] == 1 else '{"name": "x", "score": 1}'
 
@@ -83,6 +84,20 @@ def test_claude_structured_retries_then_succeeds(monkeypatch):
     out = cli.ClaudeCLIChat("haiku").with_structured_output(Toy).invoke([("human", "h")])
     assert out.score == 1
     assert calls["n"] == 2
+
+
+def test_structured_loop_reports_empty_cli_response(monkeypatch):
+    monkeypatch.setattr(cli, "_run_claude", lambda prompt, model, timeout=None: "   ")
+    with pytest.raises(LLMResponseFormatError) as ei:
+        cli.ClaudeCLIChat("haiku").with_structured_output(Toy).invoke([("human", "h")])
+    assert "回覆空白" in str(ei.value)
+
+
+def test_structured_loop_reports_non_json_cli_response(monkeypatch):
+    monkeypatch.setattr(cli, "_run_codex", lambda prompt, timeout=None, extra_args=None: "not json")
+    with pytest.raises(LLMResponseFormatError) as ei:
+        cli.CodexCLIChat().with_structured_output(Toy).invoke([("human", "h")])
+    assert "不是合法 JSON" in str(ei.value)
 
 
 def test_run_claude_strips_api_key_and_parses(monkeypatch):
@@ -96,10 +111,11 @@ def test_run_claude_strips_api_key_and_parses(monkeypatch):
     def fake_run(args, **kwargs):
         seen["args"] = args
         seen["env"] = kwargs.get("env", {})
+        seen["timeout"] = kwargs.get("timeout")
         return FakeProc()
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-should-be-removed")
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "_run_process", fake_run)
     monkeypatch.setattr(cli.shutil, "which", lambda name: "claude")
     out = cli._run_claude("hi", "haiku")
     assert out == "答案"
@@ -113,20 +129,23 @@ def test_run_claude_raises_on_error_envelope(monkeypatch):
         stdout = json.dumps({"is_error": True, "result": "Invalid API key"})
         stderr = ""
 
-    monkeypatch.setattr(cli.subprocess, "run", lambda args, **kw: FakeProc())
+    monkeypatch.setattr(cli, "_run_process", lambda args, **kw: FakeProc())
     monkeypatch.setattr(cli.shutil, "which", lambda name: "claude")
     with pytest.raises(RuntimeError):
         cli._run_claude("hi", "haiku")
 
 
 def test_codex_structured_parses(monkeypatch):
-    monkeypatch.setattr(cli, "_run_codex", lambda prompt, extra_args=None: '{"name": "c", "score": 5}')
+    monkeypatch.setattr(
+        cli, "_run_codex", lambda prompt, timeout=None, extra_args=None: '{"name": "c", "score": 5}'
+    )
     out = cli.CodexCLIChat().with_structured_output(Toy).invoke([("human", "h")])
     assert out.name == "c" and out.score == 5
 
 
 def test_run_claude_strips_null_bytes_from_prompt(monkeypatch):
-    # 履歷/JD 偶有殘留 \x00（UTF-16 .txt、某些 PDF）；直接進 subprocess 會丟 ValueError("embedded null byte")，
+    # 履歷/JD 偶有殘留 \x00（UTF-16 .txt、某些 PDF）；
+    # 直接進 subprocess 會丟 ValueError("embedded null byte")。
     # 這正是「一按搜尋就 AI 服務暫時無法使用（ValueError）」的根因。送進 args 的 prompt 必須先清掉。
     seen = {}
 
@@ -139,7 +158,7 @@ def test_run_claude_strips_null_bytes_from_prompt(monkeypatch):
         seen["args"] = args
         return FakeProc()
 
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "_run_process", fake_run)
     monkeypatch.setattr(cli.shutil, "which", lambda name: "claude")
     cli._run_claude("履歷\x00內容\x00殘留", "haiku")
     assert all("\x00" not in a for a in seen["args"])
@@ -150,10 +169,14 @@ def test_run_claude_tolerates_noise_around_json_envelope(monkeypatch):
     # 用 _extract_json 把 envelope 抽出來才穩。
     class FakeProc:
         returncode = 0
-        stdout = "⚠ update available\n" + json.dumps({"is_error": False, "result": "答案"}) + "\nbye"
+        stdout = (
+            "⚠ update available\n"
+            + json.dumps({"is_error": False, "result": "答案"})
+            + "\nbye"
+        )
         stderr = ""
 
-    monkeypatch.setattr(cli.subprocess, "run", lambda args, **kw: FakeProc())
+    monkeypatch.setattr(cli, "_run_process", lambda args, **kw: FakeProc())
     monkeypatch.setattr(cli.shutil, "which", lambda name: "claude")
     assert cli._run_claude("hi", "haiku") == "答案"
 
@@ -166,7 +189,7 @@ def test_run_claude_raises_clear_error_on_non_json(monkeypatch):
         stdout = "Please run `claude login` first."
         stderr = ""
 
-    monkeypatch.setattr(cli.subprocess, "run", lambda args, **kw: FakeProc())
+    monkeypatch.setattr(cli, "_run_process", lambda args, **kw: FakeProc())
     monkeypatch.setattr(cli.shutil, "which", lambda name: "claude")
     with pytest.raises(RuntimeError) as ei:
         cli._run_claude("hi", "haiku")
@@ -185,7 +208,7 @@ def test_run_codex_strips_null_bytes_from_prompt(monkeypatch):
         seen["args"] = args
         return FakeProc()
 
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "_run_process", fake_run)
     monkeypatch.setattr(cli.shutil, "which", lambda name: "codex")
     cli._run_codex("JD\x00內容\x00殘留")
     assert all("\x00" not in a for a in seen["args"])

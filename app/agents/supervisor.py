@@ -11,7 +11,11 @@ from __future__ import annotations
 
 from app.llm import get_llm
 from app.models import (
-    MatchReport, CritiqueReport, ParsedJob, Profile, SupervisorDecision,
+    CritiqueReport,
+    MatchReport,
+    ParsedJob,
+    Profile,
+    SupervisorDecision,
 )
 
 PROCEED_SCORE_THRESHOLD = 60

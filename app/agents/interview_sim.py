@@ -4,7 +4,11 @@
 """
 from app.llm import get_llm
 from app.models import (
-    Profile, InterviewQuestion, InterviewQuestionList, AnswerFeedback, InterviewSummary,
+    AnswerFeedback,
+    InterviewQuestion,
+    InterviewQuestionList,
+    InterviewSummary,
+    Profile,
 )
 
 _Q_SYSTEM = (

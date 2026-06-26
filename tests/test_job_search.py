@@ -1,5 +1,5 @@
-from app.models import Profile, JobPosting
 from app.agents import job_search as mod
+from app.models import JobPosting, Profile
 from tests.conftest import FakeLLM
 
 

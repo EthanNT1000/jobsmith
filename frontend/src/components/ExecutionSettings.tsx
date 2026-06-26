@@ -54,10 +54,17 @@ export function ExecutionSettings({ onClose }: { onClose: () => void }) {
                 <p className="text-xs text-slate-500">透過掃描 PATH 自動偵測，選擇你希望使用的 CLI。</p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <button type="button" onClick={() => be.runTest(cliTestId)} disabled={be.busy || be.tests[cliTestId] === "loading"}
-                  className="text-xs border border-slate-300 rounded-lg px-3 py-1.5 text-slate-600 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:opacity-50">
-                  測試
-                </button>
+                {be.tests[cliTestId] === "loading" ? (
+                  <button type="button" onClick={() => be.stopTest(cliTestId)}
+                    className="text-xs border border-rose-200 bg-rose-50 rounded-lg px-3 py-1.5 text-rose-700 hover:bg-rose-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300">
+                    停止
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => be.runTest(cliTestId)} disabled={be.busy}
+                    className="text-xs border border-slate-300 rounded-lg px-3 py-1.5 text-slate-600 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:opacity-50">
+                    測試
+                  </button>
+                )}
                 <button type="button" onClick={() => be.reload()} disabled={be.busy}
                   className="inline-flex items-center gap-1 text-xs border border-slate-300 rounded-lg px-3 py-1.5 text-slate-600 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:opacity-50">
                   <RefreshCw className="w-3.5 h-3.5" />重新掃描
@@ -116,10 +123,17 @@ export function ExecutionSettings({ onClose }: { onClose: () => void }) {
               placeholder="Model（例：deepseek-chat / gpt-4o-mini）" aria-label="Model"
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-200" />
             <div className="flex items-center gap-2 pt-1">
-              <button type="button" onClick={async () => { await be.saveByok(byok, false); be.runTest("openai") }} disabled={be.busy}
-                className="text-sm border border-slate-300 rounded-lg px-3 py-1.5 text-slate-600 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:opacity-50">
-                測試
-              </button>
+              {be.tests.openai === "loading" ? (
+                <button type="button" onClick={() => be.stopTest("openai")}
+                  className="text-sm border border-rose-200 bg-rose-50 rounded-lg px-3 py-1.5 text-rose-700 hover:bg-rose-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300">
+                  停止
+                </button>
+              ) : (
+                <button type="button" onClick={async () => { await be.saveByok(byok, false); be.runTest("openai") }} disabled={be.busy}
+                  className="text-sm border border-slate-300 rounded-lg px-3 py-1.5 text-slate-600 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:opacity-50">
+                  測試
+                </button>
+              )}
               <button type="button" onClick={() => be.saveByok(byok, true)} disabled={be.busy}
                 className="inline-flex items-center gap-1.5 text-sm bg-brand-600 text-white rounded-lg px-3 py-1.5 hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:opacity-50">
                 <KeyRound className="w-4 h-4" />儲存並啟用

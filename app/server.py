@@ -11,23 +11,23 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, UploadFile, Body
-from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse, Response, FileResponse
+from fastapi import Body, FastAPI, File, Form, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 from langgraph.checkpoint.memory import MemorySaver
+from pydantic import BaseModel
 
-from app import settings
+from app import settings, task_control
+from app.agents.company_jobs import find_company_jobs
+from app.agents.job_search import derive_queries, fallback_rank_jobs, rank_jobs
+from app.agents.resume_eval import evaluate_resume, fallback_resume_assessment, structure_profile
 from app.cli import load_profile
 from app.graph import build_graph
-from app.models import Profile
 from app.intake.resume_parser import extract_text
-from app.agents.resume_eval import structure_profile, evaluate_resume
-from app.agents.job_search import derive_queries, fallback_rank_jobs, rank_jobs
-from app.agents.company_jobs import find_company_jobs
-from app.sources.registry import search_all, linkedin_search_url
+from app.llm_errors import LLMResponseFormatError
+from app.models import Profile
 from app.sources import regions
-
+from app.sources.registry import linkedin_search_url, search_all
 from app.store import db as _appdb
 from app.store import history as _history
 from app.store import memory as _memory
@@ -130,6 +130,19 @@ def _sse(obj: dict) -> str:
     ) + "\n\n"
 
 
+def _stopped_sse(message: str = "已停止任務") -> str:
+    return _sse({"type": "stopped", "message": message})
+
+
+def _task_from_id(task_id: str = "") -> task_control.TaskToken:
+    return task_control.create_task(task_id)
+
+
+def _finish_task(token: task_control.TaskToken | None) -> None:
+    if token is not None:
+        task_control.finish_task(token.task_id)
+
+
 # ---- 背景投遞包流程：產生投遞包改成射後不理的背景工作 ----
 # 一按就在「我的投遞包」建紀錄、伺服器背景跑完；瀏覽器重新整理/返回/切分頁都不中斷。
 # 多個產生可平行（每個用獨立 graph + 記憶體 checkpointer）；超過上限的排隊。
@@ -147,16 +160,30 @@ class _Run:
         self.package_id = package_id
         self.events: list[dict] = []
         self.done = False
+        self.cancel_requested = False
         self.future = None
         self._lock = threading.Lock()
 
     def emit(self, ev: dict) -> None:
         with self._lock:
+            if self.cancel_requested and ev.get("type") not in {"stopped", "error"}:
+                return
             self.events.append(ev)
 
     def finish(self) -> None:
         with self._lock:
             self.done = True
+
+    def request_stop(self, message: str = "已停止任務") -> None:
+        with self._lock:
+            self.cancel_requested = True
+            if not any(ev.get("type") == "stopped" for ev in self.events):
+                self.events.append({"type": "stopped", "message": message})
+            self.done = True
+
+    def is_cancelled(self) -> bool:
+        with self._lock:
+            return self.cancel_requested
 
     def snapshot(self, since: int) -> tuple[list[dict], bool]:
         with self._lock:
@@ -185,7 +212,13 @@ def _run_pipeline_bg(run: "_Run", initial: dict, config: dict, graph) -> None:
     跑完更新歷史那筆為 done。"""
     try:
         for chunk in graph.stream(initial, config, stream_mode="updates"):
+            if run.is_cancelled():
+                _history.set_status(run.package_id, "stopped")
+                return
             for node, update in chunk.items():
+                if run.is_cancelled():
+                    _history.set_status(run.package_id, "stopped")
+                    return
                 if node == "__interrupt__":
                     continue
                 update = update or {}
@@ -195,11 +228,17 @@ def _run_pipeline_bg(run: "_Run", initial: dict, config: dict, graph) -> None:
                 for t in update.get("telemetry") or []:
                     run.emit({"type": "telemetry", **t})
                 run.emit({"type": "node", "node": node, "data": serialize_update(update)})
+        if run.is_cancelled():
+            _history.set_status(run.package_id, "stopped")
+            return
         snapshot = graph.get_state(config)
         final = serialize_update(snapshot.values)
         _history.update_package_result(run.package_id, final)
         run.emit({"type": "done", "package_id": run.package_id})
     except Exception as exc:  # noqa: BLE001 — 背景出錯也要收尾，不讓那筆永遠卡「進行中」
+        if run.is_cancelled():
+            _history.set_status(run.package_id, "stopped")
+            return
         detail = _err_detail(exc)
         run.emit({"type": "error", "message": detail})
         try:
@@ -225,29 +264,68 @@ class RunBody(BaseModel):
 def resume_evaluate(
     file: UploadFile | None = File(default=None),
     resume_text: str = Form(default=""),
+    task_id: str = Form(default=""),
 ):
     text, text_error = _resume_text_from_request(file, resume_text)
+    token = _task_from_id(task_id)
 
     def gen():
-        yield _sse({"type": "start"})
-        if text_error:
-            yield _sse({"type": "error", "message": text_error})
-            return
-        if not text.strip():
-            yield _sse({"type": "error", "message": "請提供履歷檔案或文字"})
-            return
         try:
-            yield _sse({"type": "progress", "step": "structure", "message": "解析履歷中…"})
-            profile = structure_profile(text)
+            yield _sse({"type": "start", "task_id": token.task_id})
+            token.check()
+            if text_error:
+                yield _sse({"type": "error", "message": text_error})
+                return
+            if not text.strip():
+                yield _sse({"type": "error", "message": "請提供履歷檔案或文字"})
+                return
+            yield _sse({
+                "type": "progress",
+                "step": "received",
+                "message": "已收到履歷，準備開始健檢；通常需要 30 秒到 2 分鐘。",
+            })
+            token.check()
+            yield _sse({
+                "type": "progress",
+                "step": "structure",
+                "message": "解析履歷背景中…正在整理姓名、定位、技能與經歷。",
+            })
+            with task_control.task_context(token):
+                profile = structure_profile(text)
+            token.check()
             # 含 raw_text 原文，供使用者接著到「投遞包工作台」手動開跑時帶入本人背景。
             yield _sse({"type": "profile", "data": profile.model_dump()})
-            yield _sse({"type": "progress", "step": "evaluate", "message": "健檢評估中…"})
-            assessment = evaluate_resume(text, profile)
+            yield _sse({
+                "type": "progress",
+                "step": "evaluate",
+                "message": "深度健檢評估中…會檢查 ATS、量化成果、台灣履歷慣例與改寫範例，長履歷或 CLI 模型可能需要更久。",
+            })
+            token.check()
+            try:
+                with task_control.task_context(token):
+                    assessment = evaluate_resume(text, profile)
+            except LLMResponseFormatError as exc:
+                yield _sse({
+                    "type": "progress",
+                    "step": "fallback",
+                    "message": "AI 回覆格式不正確，正在改用保守備援健檢產出可讀報告。",
+                })
+                assessment = fallback_resume_assessment(text, profile, reason=str(exc))
+            token.check()
+            yield _sse({
+                "type": "progress",
+                "step": "finalize",
+                "message": "整理健檢報告中…",
+            })
             yield _sse({"type": "assessment", "data": assessment})
             yield _sse({"type": "done"})
+        except task_control.TaskCancelled:
+            yield _stopped_sse()
         except Exception as exc:  # LLM 後端 429/額度/截斷等：回傳友善訊息而非中斷串流
             yield _sse({"type": "error",
                         "message": f"AI 服務暫時無法使用，請稍後再試。（{_err_detail(exc)}）"})
+        finally:
+            _finish_task(token)
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
@@ -255,7 +333,13 @@ def resume_evaluate(
 _RANK_BATCH = 12  # 每批送 LLM 排序的職缺數（批小→首批更快出現）
 
 
-def _rank_in_batches(profile, jobs, batch: int = _RANK_BATCH, workers: int = 4):
+def _rank_in_batches(
+    profile,
+    jobs,
+    batch: int = _RANK_BATCH,
+    workers: int = 4,
+    token: task_control.TaskToken | None = None,
+):
     """把職缺切批、並行送 rank_jobs，哪批先完成就先 yield（供 SSE 邊排邊推）。
 
     並行多個 CLI 子行程：總時間≈一批，且首批很快就回；單批失敗該批以未評分(0)回，不中斷。
@@ -263,11 +347,21 @@ def _rank_in_batches(profile, jobs, batch: int = _RANK_BATCH, workers: int = 4):
     chunks = [jobs[i:i + batch] for i in range(0, len(jobs), batch)]
     if not chunks:
         return
+    def run_rank(chunk):
+        with task_control.task_context(token):
+            if token is not None:
+                token.check()
+            return rank_jobs(profile, chunk, None)
+
     with ThreadPoolExecutor(max_workers=min(workers, len(chunks))) as ex:
-        futs = {ex.submit(rank_jobs, profile, c, None): c for c in chunks}
+        futs = {ex.submit(run_rank, c): c for c in chunks}
         for fut in as_completed(futs):
+            if token is not None:
+                token.check()
             try:
                 yield fut.result()
+            except task_control.TaskCancelled:
+                raise
             except Exception:  # noqa: BLE001 — 單批失敗不影響其他批
                 yield fallback_rank_jobs(profile, futs[fut], top_k=None)
 
@@ -291,6 +385,7 @@ def jobs_auto(
     companies: str = Form(default=""),
     pages: int = Form(default=2),
     region: str = Form(default=""),
+    task_id: str = Form(default=""),
 ):
     """履歷 → 自動找職缺：解析履歷 → 推導關鍵字 → 搜尋多站 →（選填）併入指定公司的開缺 → 依履歷排序。
 
@@ -304,37 +399,45 @@ def jobs_auto(
     text, text_error = _resume_text_from_request(file, resume_text)
     posted_profile, profile_error = (None, None) if text.strip() else _profile_from_json(profile_json)
     company_list = _parse_companies(companies)
+    token = _task_from_id(task_id)
 
     def gen():
-        yield _sse({"type": "start"})
-        if text_error:
-            yield _sse({"type": "error", "message": text_error})
-            return
-        if profile_error:
-            yield _sse({"type": "error", "message": profile_error})
-            return
-        if not text.strip() and posted_profile is None:
-            yield _sse({"type": "error", "message": "請提供履歷檔案或文字"})
-            return
         try:
+            yield _sse({"type": "start", "task_id": token.task_id})
+            token.check()
+            if text_error:
+                yield _sse({"type": "error", "message": text_error})
+                return
+            if profile_error:
+                yield _sse({"type": "error", "message": profile_error})
+                return
+            if not text.strip() and posted_profile is None:
+                yield _sse({"type": "error", "message": "請提供履歷檔案或文字"})
+                return
             if text.strip():
                 yield _sse({"type": "progress", "step": "structure", "message": "解析履歷中…"})
-                profile = structure_profile(text)
+                with task_control.task_context(token):
+                    profile = structure_profile(text)
             else:
                 yield _sse({"type": "progress", "step": "profile", "message": "使用目前 Profile…"})
                 profile = posted_profile
                 assert profile is not None
+            token.check()
             # 把使用者真實履歷（含 raw_text 原文）送給前端，供「產生投遞包」時整包帶入 pipeline，
             # 讓 match/resume/cover/interview agent 拿到逐字履歷（檔案上傳時前端沒有原文，必須由後端帶）。
             yield _sse({"type": "profile", "data": profile.model_dump()})
-            queries = derive_queries(profile)
+            with task_control.task_context(token):
+                queries = derive_queries(profile)
+            token.check()
             yield _sse({"type": "queries", "queries": queries})
 
             seen: set[str] = set()
             resume_jobs = []
             for q in queries[:3]:
+                token.check()
                 yield _sse({"type": "progress", "step": "search", "message": f"搜尋「{q}」中…"})
                 for res in search_all(q, limit=15, pages=pages, area=area):
+                    token.check()
                     # 104 已於來源端用 area 篩過；其餘來源在結果端依 location 過濾，地區一致生效。
                     kept = [j for j in res.jobs
                             if res.source == "104" or regions.match_location(j.location, region_keys)]
@@ -361,7 +464,8 @@ def jobs_auto(
             resume_jobs.sort(key=lambda j: j.url or (j.title + j.company))
             yield _sse({"type": "rank_start", "total": len(resume_jobs), "fallback": used_fallback})
             matches = []
-            for batch in _rank_in_batches(profile, resume_jobs):
+            for batch in _rank_in_batches(profile, resume_jobs, token=token):
+                token.check()
                 matches.extend(batch)
                 yield _sse({"type": "ranked_batch", "data": [m.model_dump() for m in batch]})
             li_loc = f"{region_keys[0]}, Taiwan" if region_keys else "Taiwan"
@@ -372,6 +476,7 @@ def jobs_auto(
             # 避免低適配的公司職缺佔據 AI 推薦名單前段、又吃掉排序名額。
             company_pool = []
             for company in company_list:
+                token.check()
                 yield _sse({"type": "progress", "step": "company",
                             "message": f"查「{company}」的開缺中…"})
                 try:
@@ -391,13 +496,20 @@ def jobs_auto(
             if company_pool:
                 yield _sse({"type": "progress", "step": "rank",
                             "message": f"依履歷排序 {len(company_pool)} 筆指定公司職缺…"})
-                cmatches = rank_jobs(profile, company_pool, top_k=None)
+                token.check()
+                with task_control.task_context(token):
+                    cmatches = rank_jobs(profile, company_pool, top_k=None)
+                token.check()
                 yield _sse({"type": "company_jobs",
                             "data": [m.model_dump() for m in cmatches]})
             yield _sse({"type": "done"})
+        except task_control.TaskCancelled:
+            yield _stopped_sse()
         except Exception as exc:  # LLM/網路錯誤：友善降級
             yield _sse({"type": "error",
                         "message": f"AI 服務暫時無法使用，請稍後再試。（{_err_detail(exc)}）"})
+        finally:
+            _finish_task(token)
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
@@ -426,7 +538,7 @@ class JDFetchBody(BaseModel):
 @app.post("/api/jd/fetch")
 def jd_fetch_endpoint(body: JDFetchBody):
     """貼職缺網址 → 抽取 JD 文字（104 走官方 content API，其餘走通用 HTML 抽取）。"""
-    from app.intake.jd_fetch import fetch_jd, JDFetchError
+    from app.intake.jd_fetch import JDFetchError, fetch_jd
     try:
         res = fetch_jd(body.url)
     except JDFetchError as e:
@@ -510,6 +622,7 @@ def get_backend():
 
 class BackendBody(BaseModel):
     backend: str
+    task_id: str = ""
 
 
 @app.post("/api/backend")
@@ -594,27 +707,35 @@ def test_backend(body: BackendBody):
         return JSONResponse({"ok": False, "message": "不支援的後端"}, status_code=400)
     if not _backend_available(name):
         return {"ok": False, "message": "找不到對應的 CLI 或金鑰，請確認已安裝並登入。"}
+    token = _task_from_id(body.task_id) if body.task_id else None
     try:
-        if name == "claude_cli":
-            out = _probe_claude()
-        elif name == "codex_cli":
-            out = _probe_codex()
-        elif name == "openai":
-            out = _probe_openai()
-        else:  # anthropic
-            from langchain_anthropic import ChatAnthropic
-            out = ChatAnthropic(model=settings.get_model("cheap"), max_tokens=50).invoke(
-                [("human", "只回覆兩個字：你好")]).content
+        with task_control.task_context(token):
+            task_control.check_cancelled()
+            if name == "claude_cli":
+                out = _probe_claude()
+            elif name == "codex_cli":
+                out = _probe_codex()
+            elif name == "openai":
+                out = _probe_openai()
+            else:  # anthropic
+                from langchain_anthropic import ChatAnthropic
+                out = ChatAnthropic(model=settings.get_model("cheap"), max_tokens=50).invoke(
+                    [("human", "只回覆兩個字：你好")]).content
         ok = bool((out or "").strip())
         return {"ok": ok, "message": "連線成功" if ok else "回覆為空，請重試。"}
+    except task_control.TaskCancelled:
+        return {"ok": False, "message": "已停止任務"}
     except Exception as e:  # noqa: BLE001 — 任何 CLI/網路錯誤都回友善訊息
         return {"ok": False, "message": f"連線失敗（{type(e).__name__}），請確認 CLI 已登入。"}
+    finally:
+        _finish_task(token)
 
 
 class InterviewStartBody(BaseModel):
     jd_text: str
     profile: dict | None = None
     n: int = 6
+    task_id: str = ""
 
 
 class InterviewAnswerBody(BaseModel):
@@ -622,34 +743,50 @@ class InterviewAnswerBody(BaseModel):
     question: str
     answer: str
     profile: dict | None = None
+    task_id: str = ""
 
 
 class InterviewSummaryBody(BaseModel):
     jd_text: str
     transcript: list[dict]
+    task_id: str = ""
 
 
 @app.post("/api/interview/start")
 def interview_start(body: InterviewStartBody):
     from app.agents.interview_sim import generate_questions
+    token = _task_from_id(body.task_id) if body.task_id else None
     try:
-        profile = _resolve_profile(body)
-        qs = generate_questions(body.jd_text, profile, n=body.n)
+        with task_control.task_context(token):
+            profile = _resolve_profile(body)
+            task_control.check_cancelled()
+            qs = generate_questions(body.jd_text, profile, n=body.n)
+    except task_control.TaskCancelled:
+        return JSONResponse({"error": "已停止任務"}, status_code=400)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"error": f"AI 服務暫時無法使用，請稍後再試。（{_err_detail(exc)}）"},
                             status_code=400)
+    finally:
+        _finish_task(token)
     return {"questions": [q.model_dump() for q in qs]}
 
 
 @app.post("/api/interview/answer")
 def interview_answer(body: InterviewAnswerBody):
     from app.agents.interview_sim import evaluate_answer
+    token = _task_from_id(body.task_id) if body.task_id else None
     try:
-        profile = _resolve_profile(body)
-        fb = evaluate_answer(body.question, body.answer, body.jd_text, profile)
+        with task_control.task_context(token):
+            profile = _resolve_profile(body)
+            task_control.check_cancelled()
+            fb = evaluate_answer(body.question, body.answer, body.jd_text, profile)
+    except task_control.TaskCancelled:
+        return JSONResponse({"error": "已停止任務"}, status_code=400)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"error": f"AI 服務暫時無法使用，請稍後再試。（{_err_detail(exc)}）"},
                             status_code=400)
+    finally:
+        _finish_task(token)
     return fb.model_dump()
 
 
@@ -659,18 +796,26 @@ class PipelineChatBody(BaseModel):
     jd_text: str = ""
     profile: dict | None = None
     messages: list[dict] = []          # [{role: user|assistant, content}]
+    task_id: str = ""
 
 
 @app.post("/api/pipeline/chat")
 def pipeline_chat(body: PipelineChatBody):
     """履歷／求職信的多輪對話修改：回覆建議，並（必要時）回傳修訂後的文件欄位。"""
     from app.agents.refine import refine_document
+    token = _task_from_id(body.task_id) if body.task_id else None
     try:
-        profile = _resolve_profile(body)
-        res = refine_document(body.doc_type, body.current, body.messages, body.jd_text, profile)
+        with task_control.task_context(token):
+            profile = _resolve_profile(body)
+            task_control.check_cancelled()
+            res = refine_document(body.doc_type, body.current, body.messages, body.jd_text, profile)
+    except task_control.TaskCancelled:
+        return JSONResponse({"error": "已停止任務"}, status_code=400)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"error": f"AI 服務暫時無法使用，請稍後再試。（{_err_detail(exc)}）"},
                             status_code=400)
+    finally:
+        _finish_task(token)
     if body.doc_type == "resume":
         updated = (None if res.updated_summary is None and res.updated_bullets is None
                    else {"summary": res.updated_summary or "", "bullets": res.updated_bullets or []})
@@ -683,11 +828,18 @@ def pipeline_chat(body: PipelineChatBody):
 @app.post("/api/interview/summary")
 def interview_summary(body: InterviewSummaryBody):
     from app.agents.interview_sim import summarize
+    token = _task_from_id(body.task_id) if body.task_id else None
     try:
-        s = summarize(body.jd_text, body.transcript)
+        with task_control.task_context(token):
+            task_control.check_cancelled()
+            s = summarize(body.jd_text, body.transcript)
+    except task_control.TaskCancelled:
+        return JSONResponse({"error": "已停止任務"}, status_code=400)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"error": f"AI 服務暫時無法使用，請稍後再試。（{_err_detail(exc)}）"},
                             status_code=400)
+    finally:
+        _finish_task(token)
     return s.model_dump()
 
 
@@ -775,6 +927,29 @@ def run_events(thread_id: str, since: int = 0):
         return {"found": False, "events": [], "done": True}
     events, done = run_obj.snapshot(since)
     return {"found": True, "events": events, "done": done, "package_id": run_obj.package_id}
+
+
+@app.post("/api/run/{thread_id}/stop")
+def run_stop(thread_id: str):
+    """Request a background run to stop and sync persisted status immediately."""
+    run_obj = _RUNS.get(thread_id)
+    if run_obj is None:
+        return JSONResponse({"error": "找不到執行中的任務"}, status_code=404)
+    run_obj.request_stop()
+    try:
+        if run_obj.future is not None:
+            run_obj.future.cancel()
+    except Exception:
+        pass
+    _history.set_status(run_obj.package_id, "stopped")
+    return {"ok": True, "status": "stopped", "package_id": run_obj.package_id}
+
+
+@app.post("/api/tasks/{task_id}/stop")
+def task_stop(task_id: str):
+    """Request a foreground SSE/JSON task to stop."""
+    ok = task_control.request_stop(task_id)
+    return {"ok": ok, "status": "stopped" if ok else "not_found"}
 
 
 @app.get("/api/memory")

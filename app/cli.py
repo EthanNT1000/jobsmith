@@ -6,9 +6,9 @@ from pathlib import Path
 
 from langgraph.types import Command
 
+from app.graph import build_graph
 from app.models import Profile
 from app.state import CopilotState
-from app.graph import build_graph
 
 
 def load_profile(path: str = "data/demo_profile.json") -> Profile:

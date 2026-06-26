@@ -11,7 +11,7 @@ import { Button } from "../ui/Button"
 import { EmptyState } from "../ui/EmptyState"
 import {
   Sparkles, Network, ArrowLeft, AlertTriangle, FileText, ChevronLeft, ChevronRight,
-  Loader2, CheckCircle2,
+  Loader2, CheckCircle2, XCircle,
 } from "../ui/icons"
 
 type Phase = "idle" | "running" | "done"
@@ -80,11 +80,31 @@ export function PipelineView(
       setPhase("done"); setStatus("完成 ✅")
     } else if (ev.type === "error") {
       setError(ev.message || "發生錯誤"); setPhase("done"); setStatus("")
+    } else if (ev.type === "stopped") {
+      setPhase("done"); setStatus(ev.message || "已停止任務")
     }
   }
 
   function stopPoll() {
     if (poll.current.timer) { window.clearTimeout(poll.current.timer); poll.current.timer = null }
+  }
+
+  async function stopRun() {
+    const threadId = poll.current.thread
+    stopPoll()
+    localStorage.removeItem(RUN_KEY)
+    setPhase("done")
+    setStatus("已停止任務")
+    if (!threadId) return
+    try {
+      const r = await fetch(`/api/run/${threadId}/stop`, { method: "POST" })
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}))
+        setError(d.error || "停止任務失敗，請稍後再試。")
+      }
+    } catch {
+      setError("停止任務失敗，請確認伺服器是否仍在執行。")
+    }
   }
 
   // 輪詢某次背景產生的進度；done 或 found=false 即停。重新整理可從 since=0 重播全部。
@@ -314,6 +334,11 @@ export function PipelineView(
                 <span className="text-sm text-brand-600 inline-flex items-center gap-1">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />產生中…
                 </span>
+              )}
+              {phase === "running" && (
+                <Button variant="secondary" size="sm" icon={XCircle} onClick={() => void stopRun()}>
+                  停止任務
+                </Button>
               )}
               {phase === "done" && !error && (
                 <span className="text-sm text-emerald-600 inline-flex items-center gap-1">

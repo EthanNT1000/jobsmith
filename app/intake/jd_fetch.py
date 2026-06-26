@@ -145,7 +145,7 @@ def _format_104(detail: dict, cond: dict) -> str:
             lines.append(f"{label}\n{val}".rstrip())
         elif val:
             lines.append(f"{label}{val}")
-    return "\n".join(l for l in lines if l.strip())
+    return "\n".join(line for line in lines if line.strip())
 
 
 def _fetch_104(jid: str) -> JDFetchResult:

@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections import Counter
 
 from app.agents.skill_lexicon import extract_skills
-from app.models import Profile, JobPosting, SkillCount, SkillGapReport
+from app.models import JobPosting, Profile, SkillCount, SkillGapReport
 
 
 def _norm(s: str) -> str:

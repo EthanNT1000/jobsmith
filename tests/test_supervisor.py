@@ -1,5 +1,5 @@
 from app.agents import supervisor as sup
-from app.models import MatchReport, CritiqueReport, ParsedJob, Profile, SupervisorDecision
+from app.models import CritiqueReport, MatchReport, ParsedJob, Profile, SupervisorDecision
 from tests.conftest import FakeLLM
 
 

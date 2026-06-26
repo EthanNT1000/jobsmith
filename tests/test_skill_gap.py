@@ -1,6 +1,6 @@
 from app.agents.skill_gap import analyze_skill_gap
 from app.agents.skill_lexicon import extract_skills
-from app.models import Profile, JobPosting
+from app.models import JobPosting, Profile
 
 
 def test_gap_and_demand():

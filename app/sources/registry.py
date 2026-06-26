@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import quote
 
 from app.models import SearchResult
-from app.sources import source_104, source_yourator, source_linkedin, source_cake
+from app.sources import source_104, source_cake, source_linkedin, source_yourator
 
 # 可關鍵字搜尋的來源（name -> search 函式）
 SEARCHABLE = {

@@ -14,8 +14,8 @@ from __future__ import annotations
 from io import BytesIO
 
 from docx import Document
-from docx.shared import Pt
 from docx.oxml.ns import qn
+from docx.shared import Pt
 
 _INTERVIEW_SECTIONS = [
     ("技術題", "technical_questions"),

@@ -1,9 +1,15 @@
-from app.models import (
-    ParsedJob, MatchReport, CompanyBrief, TailoredResume, CoverLetter,
-    InterviewKit, CritiqueReport, SupervisorDecision,
-)
 from app import cli as cli_mod
 from app import graph as graph_mod
+from app.models import (
+    CompanyBrief,
+    CoverLetter,
+    CritiqueReport,
+    InterviewKit,
+    MatchReport,
+    ParsedJob,
+    SupervisorDecision,
+    TailoredResume,
+)
 
 
 def test_load_profile_reads_demo():

@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Brand } from "../ui/Brand"
 import { Button } from "../ui/Button"
 import { Cpu, CheckCircle2, XCircle, Loader2, ArrowRight, KeyRound } from "../ui/icons"
+import { newTaskId, stopTask } from "../lib/taskControl"
 
 interface BackendOption { id: string; label: string; available: boolean; kind: string }
 interface BackendData {
@@ -26,6 +27,7 @@ export function Onboarding({ onDone, onSkip }: { onDone: () => void; onSkip?: ()
   const [testing, setTesting] = useState(false)
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
   const [starting, setStarting] = useState(false)
+  const testRef = useRef<{ taskId: string; ctrl: AbortController } | null>(null)
 
   useEffect(() => {
     fetch("/api/backend")
@@ -73,6 +75,9 @@ export function Onboarding({ onDone, onSkip }: { onDone: () => void; onSkip?: ()
 
   async function test() {
     if (!selected) return
+    const ctrl = new AbortController()
+    const taskId = newTaskId("onboarding-test")
+    testRef.current = { taskId, ctrl }
     setTesting(true)
     setResult(null)
     try {
@@ -80,14 +85,37 @@ export function Onboarding({ onDone, onSkip }: { onDone: () => void; onSkip?: ()
       const r = await fetch("/api/backend/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ backend: selected }),
+        signal: ctrl.signal,
+        body: JSON.stringify({ backend: selected, task_id: taskId }),
       })
       const d = await r.json()
       setResult({ ok: Boolean(d.ok), message: d.message || (d.ok ? "測試成功" : "測試失敗") })
-    } catch {
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") {
+        setResult({ ok: false, message: "已停止測試" })
+        return
+      }
       setResult({ ok: false, message: "連線發生問題，請確認伺服器是否啟動。" })
     } finally {
+      if (testRef.current?.ctrl === ctrl) {
+        testRef.current = null
+        setTesting(false)
+      }
+    }
+  }
+
+  async function stopTest() {
+    const current = testRef.current
+    if (!current) return
+    try {
+      await stopTask(current.taskId)
+    } catch {
+      // 停止失敗時仍中止前端等待。
+    } finally {
+      current.ctrl.abort()
+      testRef.current = null
       setTesting(false)
+      setResult({ ok: false, message: "已停止測試" })
     }
   }
 
@@ -177,6 +205,7 @@ export function Onboarding({ onDone, onSkip }: { onDone: () => void; onSkip?: ()
             icon={testing ? undefined : selectedKind === "byok" ? KeyRound : Cpu}>
             {testing ? "測試中…" : "測試連線"}
           </Button>
+          {testing && <Button variant="danger" onClick={stopTest} icon={XCircle}>停止</Button>}
           <Button onClick={start} loading={starting} disabled={!selected || testing} icon={ArrowRight}>
             開始使用
           </Button>

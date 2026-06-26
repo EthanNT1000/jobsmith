@@ -1,6 +1,6 @@
 """② 匹配 Agent：對 ParsedJob 與 Profile 打分。"""
 from app.llm import get_llm
-from app.models import ParsedJob, Profile, MatchReport
+from app.models import MatchReport, ParsedJob, Profile
 
 MATCH_SYSTEM = (
     "你是資深技術招募顧問。請比對『職缺』與『求職者背景』，"

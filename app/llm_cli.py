@@ -14,10 +14,15 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Type
 
 from pydantic import BaseModel, ValidationError
+
+from app.llm_errors import LLMResponseFormatError, parse_structured_json
+from app.task_control import TaskCancelled, check_cancelled
 
 _MAX_TRIES = 3
 _TIMEOUT = 300
@@ -25,6 +30,44 @@ _TIMEOUT = 300
 # Windows：呼叫 CLI 子程序時不要彈出 console 視窗（視窗版 app 否則會一直閃黑窗）。
 # 非 Windows 取 0（無作用）。
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _run_process(args: list[str], *, env: dict[str, str], timeout: int):
+    """Run a CLI subprocess while honoring cooperative task cancellation."""
+    check_cancelled()
+    proc = subprocess.Popen(
+        args,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        env=env,
+        creationflags=_NO_WINDOW,
+    )
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            check_cancelled()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                proc.kill()
+                stdout, stderr = proc.communicate()
+                raise RuntimeError(
+                    f"CLI 執行超時（>{timeout} 秒）：{(stderr or stdout or '').strip()[:300]}"
+                )
+            try:
+                stdout, stderr = proc.communicate(timeout=min(0.2, remaining))
+                return SimpleNamespace(returncode=proc.returncode, stdout=stdout, stderr=stderr)
+            except subprocess.TimeoutExpired:
+                continue
+    except TaskCancelled:
+        proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        raise
 
 
 def _safe_arg(text: str) -> str:
@@ -85,8 +128,13 @@ def _schema_instruction(schema_model: Type[BaseModel]) -> str:
     )
 
 
-def _parse_into(schema_model: Type[BaseModel], raw: str) -> BaseModel:
-    return schema_model.model_validate_json(_extract_json(raw))
+def _parse_into(schema_model: Type[BaseModel], raw: str, backend_label: str = "CLI") -> BaseModel:
+    return parse_structured_json(
+        schema_model,
+        raw,
+        backend_label=backend_label,
+        extract_json=_extract_json,
+    )
 
 
 def _repair_hint(exc: ValidationError) -> str:
@@ -99,7 +147,7 @@ def _repair_hint(exc: ValidationError) -> str:
             "\n" + "\n".join(problems))
 
 
-def _structured_loop(run_prompt, schema, messages):
+def _structured_loop(run_prompt, schema, messages, backend_label: str = "CLI"):
     """共用結構化輸出迴圈：組提示 → 跑 → 抽/驗 → 失敗帶欄位錯誤重試。"""
     system, human = _messages_to_prompt(messages)
     base = f"{system}\n\n{human}\n\n{_schema_instruction(schema)}"
@@ -110,14 +158,27 @@ def _structured_loop(run_prompt, schema, messages):
         raw = run_prompt(prompt)
         last_raw = raw
         try:
-            return _parse_into(schema, raw)
+            return _parse_into(schema, raw, backend_label=backend_label)
+        except LLMResponseFormatError as exc:
+            last_err = exc
+            if exc.kind == "schema" and exc.validation_error is not None:
+                prompt = base + "\n\n" + _repair_hint(exc.validation_error)
+            elif exc.kind == "empty":
+                prompt = base + "\n\n上次回覆是空白，請只輸出一個合法 JSON 物件。"
+            else:
+                prompt = base + "\n\n上次回覆不是合法 JSON，請只輸出一個合法 JSON 物件。"
         except ValidationError as exc:
             last_err = exc
             prompt = base + "\n\n" + _repair_hint(exc)
         except json.JSONDecodeError as exc:
             last_err = exc
-            prompt = base + "\n\n（上次輸出不是合法 JSON，請只輸出一個合法 JSON 物件，不要任何其他文字）"
+            prompt = (
+                base
+                + "\n\n（上次輸出不是合法 JSON，請只輸出一個合法 JSON 物件，不要任何其他文字）"
+            )
     # 帶上『最後一次實際輸出』片段，方便診斷 codex/claude 到底吐了什麼導致解析失敗。
+    if isinstance(last_err, LLMResponseFormatError):
+        raise last_err
     raise RuntimeError(
         f"CLI 結構化輸出解析失敗：{last_err}；最後輸出：{(last_raw or '').strip()[:200]!r}"
     ) from last_err
@@ -147,10 +208,7 @@ def _run_claude(prompt: str, model: str, allowed_tools: list[str] | None = None,
     args = [exe, "-p", _safe_arg(prompt), "--output-format", "json", "--model", model]
     if allowed_tools:
         args += ["--allowedTools", *allowed_tools]
-    proc = subprocess.run(
-        args, input="", capture_output=True, text=True, encoding="utf-8",
-        env=env, timeout=timeout, creationflags=_NO_WINDOW,
-    )
+    proc = _run_process(args, env=env, timeout=timeout)
     if proc.returncode != 0:
         raise RuntimeError(f"claude CLI 失敗（rc={proc.returncode}）：{(proc.stderr or '')[:300]}")
     try:
@@ -172,7 +230,7 @@ def run_claude_structured_research(schema, messages, model: str):
     return _structured_loop(
         lambda prompt: _run_claude(prompt, model,
                                    allowed_tools=CLAUDE_RESEARCH_TOOLS, timeout=_RESEARCH_TIMEOUT),
-        schema, messages,
+        schema, messages, "Claude Code CLI",
     )
 
 
@@ -196,29 +254,35 @@ def _record_usage(envelope: dict) -> None:
 class _CLIStructured:
     """通用結構化包裝：呼叫 runner、抽 JSON、驗證、失敗帶欄位錯誤重試。"""
 
-    def __init__(self, runner, model, schema):
+    def __init__(self, runner, model, schema, timeout: int = _TIMEOUT):
         self._runner = runner
         self._model = model
         self._schema = schema
+        self._timeout = timeout
 
     def invoke(self, messages):
         return _structured_loop(
-            lambda prompt: self._runner(prompt, self._model), self._schema, messages)
+            lambda prompt: self._runner(prompt, self._model, timeout=self._timeout),
+            self._schema,
+            messages,
+            "Claude Code CLI",
+        )
 
 
 class ClaudeCLIChat:
     """相容 LangChain 介面的 Claude Code CLI 後端。"""
 
-    def __init__(self, model: str, max_tokens: int = 2000):
+    def __init__(self, model: str, max_tokens: int = 2000, timeout: int = _TIMEOUT):
         self.model = model
         self.max_tokens = max_tokens  # CLI 不需要；保留以對齊介面
+        self.timeout = timeout
 
     def with_structured_output(self, schema):
-        return _CLIStructured(_run_claude, self.model, schema)
+        return _CLIStructured(_run_claude, self.model, schema, timeout=self.timeout)
 
     def invoke(self, messages):
         system, human = _messages_to_prompt(messages)
-        return _run_claude(f"{system}\n\n{human}", self.model)
+        return _run_claude(f"{system}\n\n{human}", self.model, timeout=self.timeout)
 
 
 # ---------------------------------------------------------------------------
@@ -241,25 +305,29 @@ def _run_codex(prompt: str, timeout: int = _TIMEOUT, extra_args: list[str] | Non
         # -o 為 --output-last-message 短旗標：把模型最終訊息寫入檔案，避免混入 agent log
         args = [exe, "exec", "--skip-git-repo-check", "-s", "read-only",
                 "-o", str(out_file), *(extra_args or []), _safe_arg(prompt)]
-        proc = subprocess.run(
-            args, input="", capture_output=True, text=True, encoding="utf-8",
-            env=env, timeout=timeout, creationflags=_NO_WINDOW,
-        )
+        proc = _run_process(args, env=env, timeout=timeout)
         if proc.returncode != 0:
-            raise RuntimeError(f"codex CLI 失敗（rc={proc.returncode}）：{(proc.stderr or '')[:300]}")
+            raise RuntimeError(
+                f"codex CLI 失敗（rc={proc.returncode}）：{(proc.stderr or '')[:300]}"
+            )
         if out_file.exists():
             return out_file.read_text(encoding="utf-8")
         return proc.stdout or ""
 
 
 class _CodexStructured:
-    def __init__(self, schema, extra_args=None):
+    def __init__(self, schema, extra_args=None, timeout: int = _TIMEOUT):
         self._schema = schema
         self._extra = extra_args
+        self._timeout = timeout
 
     def invoke(self, messages):
         return _structured_loop(
-            lambda prompt: _run_codex(prompt, extra_args=self._extra), self._schema, messages)
+            lambda prompt: _run_codex(prompt, timeout=self._timeout, extra_args=self._extra),
+            self._schema,
+            messages,
+            "Codex CLI",
+        )
 
 
 class CodexCLIChat:
@@ -268,17 +336,24 @@ class CodexCLIChat:
     model=None 時用 codex 自身設定的預設模型；指定 model 時以 -c model=... 覆寫。
     """
 
-    def __init__(self, tier: str = "standard", max_tokens: int = 2000, model: str | None = None):
+    def __init__(
+        self,
+        tier: str = "standard",
+        max_tokens: int = 2000,
+        model: str | None = None,
+        timeout: int = _TIMEOUT,
+    ):
         self.tier = tier
         self.max_tokens = max_tokens
         self.model = model
+        self.timeout = timeout
 
     def _extra(self) -> list[str] | None:
         return ["-c", f'model="{self.model}"'] if self.model else None
 
     def with_structured_output(self, schema):
-        return _CodexStructured(schema, self._extra())
+        return _CodexStructured(schema, self._extra(), timeout=self.timeout)
 
     def invoke(self, messages):
         system, human = _messages_to_prompt(messages)
-        return _run_codex(f"{system}\n\n{human}", extra_args=self._extra())
+        return _run_codex(f"{system}\n\n{human}", timeout=self.timeout, extra_args=self._extra())

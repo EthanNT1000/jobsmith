@@ -2,12 +2,19 @@ import json
 
 from fastapi.testclient import TestClient
 
-from app.models import (
-    ParsedJob, MatchReport, CompanyBrief, TailoredResume, CoverLetter,
-    InterviewKit, CritiqueReport, SupervisorDecision,
-)
 from app import graph as graph_mod
 from app import server as server_mod
+from app.models import (
+    CompanyBrief,
+    CoverLetter,
+    CritiqueReport,
+    InterviewKit,
+    MatchReport,
+    ParsedJob,
+    SupervisorDecision,
+    TailoredResume,
+)
+from tests.conftest import FakeLLM
 
 
 def test_err_detail_surfaces_real_reason(monkeypatch):
@@ -113,6 +120,39 @@ def test_run_events_unknown_thread_returns_not_found():
     client = TestClient(server_mod.app)
     d = client.get("/api/run/events/does-not-exist").json()
     assert d["found"] is False and d["done"] is True
+
+
+def test_run_stop_endpoint_marks_backend_state_stopped():
+    client = TestClient(server_mod.app)
+    thread_id = "thread-stop-test"
+    pid = server_mod._history.create_running_package(thread_id, "JD", "T", None)
+    run = server_mod._Run(thread_id, pid)
+
+    class FakeFuture:
+        def __init__(self):
+            self.cancelled = False
+
+        def cancel(self):
+            self.cancelled = True
+            return True
+
+    future = FakeFuture()
+    run.future = future
+    with server_mod._RUNS_LOCK:
+        server_mod._RUNS[thread_id] = run
+    try:
+        r = client.post(f"/api/run/{thread_id}/stop")
+        assert r.status_code == 200
+        assert r.json()["status"] == "stopped"
+        assert future.cancelled is True
+        assert server_mod._history.get_package(pid)["status"] == "stopped"
+        events = client.get(f"/api/run/events/{thread_id}").json()
+        assert events["done"] is True
+        assert any(e["type"] == "stopped" for e in events["events"])
+    finally:
+        with server_mod._RUNS_LOCK:
+            server_mod._RUNS.pop(thread_id, None)
+        server_mod._history.delete_package(pid)
 
 
 def test_run_stop_path_finalizes_record(monkeypatch):
@@ -251,7 +291,7 @@ def test_run_telemetry_attributes_tokens_to_correct_node(monkeypatch):
 
 
 def test_jobs_auto_falls_back_when_all_blocked(monkeypatch):
-    from app.models import Profile, JobMatch, SearchResult
+    from app.models import JobMatch, Profile, SearchResult
     monkeypatch.setattr(server_mod, "structure_profile",
                         lambda text: Profile(name="王", summary="後端", raw_text=text))
     monkeypatch.setattr(server_mod, "derive_queries", lambda profile: ["AI 工程師"])
@@ -276,7 +316,7 @@ def test_jobs_auto_falls_back_when_all_blocked(monkeypatch):
 
 
 def test_jobs_auto_emits_profile_event(monkeypatch):
-    from app.models import Profile, JobPosting, JobMatch, SearchResult
+    from app.models import JobMatch, JobPosting, Profile, SearchResult
     monkeypatch.setattr(server_mod, "structure_profile",
                         lambda text: Profile(name="王小明", summary="後端", raw_text=text,
                                              skills=["Python"]))
@@ -295,7 +335,7 @@ def test_jobs_auto_emits_profile_event(monkeypatch):
 
 
 def test_jobs_auto_reuses_posted_profile_json_without_reparsing(monkeypatch):
-    from app.models import JobPosting, JobMatch, SearchResult
+    from app.models import JobMatch, JobPosting, SearchResult
 
     def fail_structure_profile(text):
         raise AssertionError("structure_profile should not run when profile_json is provided")
@@ -339,8 +379,33 @@ def test_jobs_auto_reuses_posted_profile_json_without_reparsing(monkeypatch):
     assert captured["area"] == ["6001001000"]
 
 
+def test_jobs_auto_repairs_empty_profile_from_parser(monkeypatch):
+    from app.models import Profile, SearchResult
+
+    monkeypatch.setattr(server_mod, "structure_profile", server_mod.structure_profile)
+    monkeypatch.setattr(server_mod, "derive_queries", lambda profile: ["工程師"])
+    monkeypatch.setattr(server_mod, "search_all",
+                        lambda q, limit=15, pages=1, area=None: [SearchResult(source="104")])
+    monkeypatch.setattr(server_mod, "_load_fallback_jobs", lambda: [])
+
+    from app.agents import resume_eval as resume_eval_mod
+    monkeypatch.setattr(resume_eval_mod, "get_llm",
+                        lambda tier: FakeLLM(Profile(name="", summary="", raw_text="")))
+
+    client = TestClient(server_mod.app)
+    r = client.post("/api/jobs/auto", data={
+        "resume_text": "Alex Chen\nFull Stack Engineer\nPython FastAPI React PostgreSQL"
+    })
+    events = _parse_sse(r.text)
+    profile = next(e["data"] for e in events if e["type"] == "profile")
+
+    assert profile["name"]
+    assert profile["summary"]
+    assert profile["skills"]
+
+
 def test_rank_in_batches_falls_back_when_ranker_raises(monkeypatch):
-    from app.models import Profile, JobPosting
+    from app.models import JobPosting, Profile
 
     def fail_rank(profile, jobs, top_k=None):
         raise RuntimeError("empty rankings from backend")
@@ -517,6 +582,51 @@ def test_resume_evaluate_with_text(monkeypatch):
     assert server_mod._memory.get_memory()["profile"] is None  # 解析履歷不應無提示跨 session 保存
 
 
+def test_resume_evaluate_progress_sets_expectation(monkeypatch):
+    from app.models import Profile, ResumeAssessment
+    server_mod._memory.clear_memory()
+    monkeypatch.setattr(server_mod, "structure_profile",
+                        lambda text: Profile(name="王小明", summary="後端工程師", raw_text=text))
+    monkeypatch.setattr(server_mod, "evaluate_resume",
+                        lambda text, profile: ResumeAssessment(
+                            overall_score=80, clarity_score=80, impact_score=80,
+                            ats_keyword_score=80, localization_score=80,
+                            completeness_score=80, summary="不錯"))
+    client = TestClient(server_mod.app)
+    r = client.post("/api/resume/evaluate", data={"resume_text": "我的履歷 Python"})
+    events = _parse_sse(r.text)
+    messages = [e["message"] for e in events if e["type"] == "progress"]
+
+    assert any("可能需要" in message for message in messages)
+    assert any("深度健檢" in message for message in messages)
+
+
+def test_resume_evaluate_falls_back_when_llm_returns_bad_json(monkeypatch):
+    from app.llm_errors import LLMResponseFormatError
+    from app.models import Profile
+    server_mod._memory.clear_memory()
+    monkeypatch.setattr(server_mod, "structure_profile",
+                        lambda text: Profile(name="王小明", summary="後端工程師",
+                                             skills=["Python"], raw_text=text))
+
+    def bad_json(text, profile):
+        raise LLMResponseFormatError("API key 回覆不是合法 JSON", kind="json")
+
+    monkeypatch.setattr(server_mod, "evaluate_resume", bad_json)
+    client = TestClient(server_mod.app)
+    r = client.post("/api/resume/evaluate",
+                    data={"resume_text": "Python 後端工程師，API 延遲降低 30%"})
+    events = _parse_sse(r.text)
+    types = [e["type"] for e in events]
+
+    assert "error" not in types
+    assert "assessment" in types
+    assert types[-1] == "done"
+    assessment = next(e["data"] for e in events if e["type"] == "assessment")
+    assert "保守備援" in assessment["summary"]
+    assert assessment["issues"]
+
+
 def test_memory_profile_requires_explicit_save_and_can_delete():
     server_mod._memory.clear_memory()
     client = TestClient(server_mod.app)
@@ -554,7 +664,7 @@ def test_resume_evaluate_handles_agent_error(monkeypatch):
 
 
 def test_jobs_auto_streams_ranked_jobs(monkeypatch):
-    from app.models import Profile, JobPosting, JobMatch, SearchResult
+    from app.models import JobMatch, JobPosting, Profile, SearchResult
     monkeypatch.setattr(server_mod, "structure_profile",
                         lambda text: Profile(name="王", summary="後端", raw_text=text))
     monkeypatch.setattr(server_mod, "derive_queries", lambda profile: ["AI 工程師"])
@@ -608,7 +718,7 @@ def test_jobs_auto_passes_pages_to_search(monkeypatch):
 
 def test_jobs_auto_region_filters_uniformly(monkeypatch):
     """選地區：104 收到 area 代碼（來源端篩）；非-104 來源的外地職缺由結果端 location 過濾掉。"""
-    from app.models import Profile, JobPosting, JobMatch, SearchResult
+    from app.models import JobMatch, JobPosting, Profile, SearchResult
     monkeypatch.setattr(server_mod, "structure_profile",
                         lambda text: Profile(name="王", summary="後端", raw_text=text))
     monkeypatch.setattr(server_mod, "derive_queries", lambda profile: ["AI"])
@@ -673,7 +783,7 @@ def test_pipeline_chat_discussion_returns_no_update(monkeypatch):
 
 def test_jobs_auto_lists_company_jobs_in_separate_event(monkeypatch):
     """指定公司名單時，公司開缺走獨立的 company_jobs 事件、與 AI 推薦分開排序。"""
-    from app.models import Profile, JobPosting, JobMatch, SearchResult
+    from app.models import JobMatch, JobPosting, Profile, SearchResult
     monkeypatch.setattr(server_mod, "structure_profile",
                         lambda text: Profile(name="王", summary="後端", raw_text=text))
     monkeypatch.setattr(server_mod, "derive_queries", lambda profile: ["AI 工程師"])
@@ -703,7 +813,7 @@ def test_jobs_auto_lists_company_jobs_in_separate_event(monkeypatch):
 
 
 def test_jobs_auto_without_companies_skips_company_lookup(monkeypatch):
-    from app.models import Profile, JobPosting, JobMatch, SearchResult
+    from app.models import JobMatch, JobPosting, Profile, SearchResult
     monkeypatch.setattr(server_mod, "structure_profile",
                         lambda text: Profile(name="王", summary="後端", raw_text=text))
     monkeypatch.setattr(server_mod, "derive_queries", lambda profile: ["AI 工程師"])

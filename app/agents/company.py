@@ -5,9 +5,9 @@
 2) Tavily 金鑰 → 走 Tavily 搜尋。
 3) 都沒有 → 用模型一般知識產 brief 並標記 data_limited + note，請使用者自行查證。
 """
-from app.tools.search import search_web
 from app.llm import get_llm, research_structured
 from app.models import CompanyBrief
+from app.tools.search import search_web
 
 COMPANY_RESEARCH_SYSTEM = (
     "你是企業情報分析師。請『使用網路搜尋』查證這家公司的最新公開資訊，彙整成情報卡："

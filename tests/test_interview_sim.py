@@ -1,6 +1,10 @@
 from app.agents import interview_sim as iv
 from app.models import (
-    Profile, InterviewQuestion, InterviewQuestionList, AnswerFeedback, InterviewSummary,
+    AnswerFeedback,
+    InterviewQuestion,
+    InterviewQuestionList,
+    InterviewSummary,
+    Profile,
 )
 from tests.conftest import FakeLLM
 

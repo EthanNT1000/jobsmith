@@ -3,9 +3,15 @@ import operator
 from typing import Annotated, TypedDict
 
 from app.models import (
-    Profile, ParsedJob, MatchReport,
-    CompanyBrief, TailoredResume, CoverLetter, InterviewKit, CritiqueReport,
+    CompanyBrief,
+    CoverLetter,
+    CritiqueReport,
+    InterviewKit,
+    MatchReport,
+    ParsedJob,
+    Profile,
     SupervisorDecision,
+    TailoredResume,
 )
 
 

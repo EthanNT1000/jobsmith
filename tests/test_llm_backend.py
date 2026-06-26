@@ -1,8 +1,12 @@
 import importlib
 from pathlib import Path
 
+import pytest
+
 import app.llm as llm_mod
 import app.settings as settings_mod
+from app.llm_errors import LLMResponseFormatError
+from tests.test_llm_cli import Toy
 
 
 def _reload(monkeypatch, backend):
@@ -159,3 +163,18 @@ def test_research_structured_uses_claude_cli(monkeypatch):
     out = m.research_structured(object, [("human", "x")], tier="standard")
     assert out == "SENTINEL"
     assert calls["model"] == "sonnet"
+
+
+def test_api_structured_wrapper_reports_empty_response():
+    class EmptyStructured:
+        def invoke(self, messages):
+            return None
+
+    class FakeChat:
+        def with_structured_output(self, schema):
+            return EmptyStructured()
+
+    wrapped = llm_mod._FriendlyStructuredChat(FakeChat(), "openai")
+    with pytest.raises(LLMResponseFormatError) as ei:
+        wrapped.with_structured_output(Toy).invoke([("human", "h")])
+    assert "回覆空白" in str(ei.value)

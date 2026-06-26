@@ -1,11 +1,11 @@
-from app.models import Profile, ResumeAssessment, ResumeIssue
 from app.agents import resume_eval as mod
+from app.models import Profile, ResumeAssessment, ResumeIssue
 from tests.conftest import FakeLLM
 
 
 def test_structure_profile_returns_profile(monkeypatch):
     canned = Profile(name="王小明", summary="後端工程師", skills=["Python"], raw_text="原文")
-    monkeypatch.setattr(mod, "get_llm", lambda tier: FakeLLM(canned))
+    monkeypatch.setattr(mod, "get_llm", lambda tier, **kw: FakeLLM(canned))
     result = mod.structure_profile("（履歷全文）")
     assert isinstance(result, Profile)
     assert result.name == "王小明"
@@ -16,20 +16,52 @@ def test_structure_profile_uses_standard_tier(monkeypatch):
     seen = {}
     canned = Profile(name="x", summary="y", raw_text="z")
 
-    def fake(tier):
+    def fake(tier, **kw):
         seen["tier"] = tier
+        seen["kw"] = kw
         return FakeLLM(canned)
 
     monkeypatch.setattr(mod, "get_llm", fake)
     mod.structure_profile("text")
     assert seen["tier"] == "standard"
+    assert seen["kw"]["timeout"] == 60
 
 
 def test_structure_profile_fills_raw_text_when_empty(monkeypatch):
     canned = Profile(name="王", summary="s", raw_text="")
-    monkeypatch.setattr(mod, "get_llm", lambda tier: FakeLLM(canned))
+    monkeypatch.setattr(mod, "get_llm", lambda tier, **kw: FakeLLM(canned))
     result = mod.structure_profile("完整履歷文字")
     assert result.raw_text == "完整履歷文字"
+
+
+def test_structure_profile_fills_required_fields_when_llm_omits_them(monkeypatch):
+    canned = Profile(name="", summary="", skills=[], raw_text="")
+    monkeypatch.setattr(mod, "get_llm", lambda tier, **kw: FakeLLM(canned))
+    result = mod.structure_profile(
+        "Alex Chen\nFull Stack Engineer\nPython FastAPI React PostgreSQL\n"
+        "Built internal APIs and reduced processing time by 30%."
+    )
+
+    assert result.name
+    assert result.summary
+    assert result.skills
+    assert result.raw_text
+
+
+def test_structure_profile_falls_back_when_llm_parse_fails(monkeypatch):
+    def fail(_tier):
+        raise RuntimeError("Claude Code CLI 回覆不是合法 JSON")
+
+    monkeypatch.setattr(mod, "get_llm", fail)
+    result = mod.structure_profile(
+        "Full Stack Engineer\nTypeScript React Node.js AWS\n"
+        "Developed dashboard and REST API for business users."
+    )
+
+    assert result.name
+    assert result.summary
+    assert result.skills
+    assert result.raw_text
 
 
 def test_evaluate_resume_returns_assessment(monkeypatch):
@@ -63,3 +95,23 @@ def test_evaluate_resume_uses_deep_tier_with_larger_max_tokens(monkeypatch):
     assert seen["tier"] == "deep"
     # 健檢輸出大且 deep 為推理模型，max_tokens 必須高於預設 2000，避免截斷
     assert seen["kw"].get("max_tokens", 0) > 2000
+
+
+def test_fallback_resume_assessment_is_usable_when_llm_format_breaks():
+    profile = Profile(
+        name="王小明",
+        summary="後端工程師",
+        skills=["Python", "FastAPI", "PostgreSQL"],
+        raw_text="",
+    )
+    assessment = mod.fallback_resume_assessment(
+        "Python FastAPI 後端工程師\n負責 API 開發，將處理時間降低 30%。",
+        profile,
+        reason="API key 回覆不是合法 JSON",
+    )
+
+    assert isinstance(assessment, ResumeAssessment)
+    assert 0 <= assessment.overall_score <= 100
+    assert "保守備援" in assessment.summary
+    assert assessment.strengths
+    assert assessment.issues

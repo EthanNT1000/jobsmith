@@ -1,7 +1,8 @@
 import { useRef, useState } from "react"
 import type { UserProfile, RefineUpdate } from "../../types"
+import { newTaskId, stopTask } from "../../lib/taskControl"
 import { Button } from "../../ui/Button"
-import { MessageSquare, Sparkles, ChevronDown, CheckCircle2 } from "../../ui/icons"
+import { MessageSquare, Sparkles, ChevronDown, CheckCircle2, XCircle } from "../../ui/icons"
 
 type Msg = { role: "user" | "assistant"; content: string; applied?: boolean }
 
@@ -21,18 +22,26 @@ export function RefineChat(
   const [input, setInput] = useState("")
   const [busy, setBusy] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const taskIdRef = useRef("")
   const label = docType === "resume" ? "履歷" : "求職信"
 
   async function send() {
     const content = input.trim()
     if (!content || busy) return
     const next: Msg[] = [...messages, { role: "user", content }]
+    const ctrl = new AbortController()
+    const taskId = newTaskId(`refine-${docType}`)
+    abortRef.current = ctrl
+    taskIdRef.current = taskId
     setMessages(next); setInput(""); setBusy(true)
     try {
       const r = await fetch("/api/pipeline/chat", {
         method: "POST", headers: { "Content-Type": "application/json" },
+        signal: ctrl.signal,
         body: JSON.stringify({
           doc_type: docType, current, jd_text: jd, profile,
+          task_id: taskId,
           messages: next.map((m) => ({ role: m.role, content: m.content })),
         }),
       })
@@ -44,11 +53,30 @@ export function RefineChat(
       const applied = Boolean(d.updated)
       if (applied) onApply(d.updated as RefineUpdate)
       setMessages((m) => [...m, { role: "assistant", content: d.reply || "（無回覆）", applied }])
-    } catch {
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") {
+        setMessages((m) => [...m, { role: "assistant", content: "已停止任務。" }])
+        return
+      }
       setMessages((m) => [...m, { role: "assistant", content: "連線發生問題，請確認伺服器是否啟動。" }])
     } finally {
-      setBusy(false)
+      if (abortRef.current === ctrl) {
+        setBusy(false)
+        abortRef.current = null
+        taskIdRef.current = ""
+      }
       requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }))
+    }
+  }
+
+  async function stopSend() {
+    try {
+      await stopTask(taskIdRef.current)
+    } catch {
+      // 停止端點失敗時仍中止前端等待。
+    } finally {
+      abortRef.current?.abort()
+      setBusy(false)
     }
   }
 
@@ -86,6 +114,7 @@ export function RefineChat(
               placeholder="例如：更強調我的 LLM 經驗、語氣再專業些…"
               className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50" />
             <Button onClick={send} loading={busy} icon={Sparkles} size="sm">送出</Button>
+            {busy && <Button onClick={stopSend} variant="danger" icon={XCircle} size="sm">停止</Button>}
           </div>
           <p className="text-xs text-slate-400 mt-1.5">AI 會回覆建議；若有修訂會直接套用到上方{label}欄位，可再手動微調。</p>
         </div>

@@ -6,8 +6,14 @@ from langgraph.types import Command
 
 from app import graph as graph_mod
 from app.models import (
-    ParsedJob, MatchReport, CompanyBrief, TailoredResume, CoverLetter,
-    InterviewKit, CritiqueReport, SupervisorDecision,
+    CompanyBrief,
+    CoverLetter,
+    CritiqueReport,
+    InterviewKit,
+    MatchReport,
+    ParsedJob,
+    SupervisorDecision,
+    TailoredResume,
 )
 
 

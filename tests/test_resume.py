@@ -1,5 +1,5 @@
-from app.models import TailoredResume
 from app.agents import resume as resume_mod
+from app.models import TailoredResume
 from tests.conftest import FakeLLM
 
 

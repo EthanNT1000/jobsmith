@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { newTaskId, stopTask } from "./taskControl"
 
 // 後端控制台共用資料層：右上角 popover 與「執行設定」面板都用這個 hook。
 export interface BackendOption { id: string; label: string; available: boolean; kind: string; version?: string }
@@ -13,14 +14,15 @@ export interface BackendData {
 export type TestState = "loading" | { ok: boolean; msg: string } | undefined
 export interface ByokForm { base_url: string; api_key: string; model: string }
 
-function postJSON(url: string, body: unknown) {
-  return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+function postJSON(url: string, body: unknown, signal?: AbortSignal) {
+  return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal })
 }
 
 export function useBackend() {
   const [data, setData] = useState<BackendData | null>(null)
   const [busy, setBusy] = useState(false)
   const [tests, setTests] = useState<Record<string, TestState>>({})
+  const testTasksRef = useRef<Record<string, { taskId: string; ctrl: AbortController }>>({})
 
   async function reload(): Promise<BackendData | null> {
     try {
@@ -58,16 +60,44 @@ export function useBackend() {
   }
 
   async function runTest(id: string) {
+    const previous = testTasksRef.current[id]
+    if (previous) {
+      void stopTask(previous.taskId).catch(() => undefined)
+      previous.ctrl.abort()
+    }
+    const ctrl = new AbortController()
+    const taskId = newTaskId(`backend-${id}`)
+    testTasksRef.current[id] = { taskId, ctrl }
     setTests((t) => ({ ...t, [id]: "loading" }))
     try {
-      const d = await (await postJSON("/api/backend/test", { backend: id })).json()
+      const d = await (await postJSON("/api/backend/test", { backend: id, task_id: taskId }, ctrl.signal)).json()
       setTests((t) => ({ ...t, [id]: { ok: Boolean(d.ok), msg: d.message || (d.ok ? "連線成功" : "連線失敗") } }))
-    } catch {
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") {
+        setTests((t) => ({ ...t, [id]: { ok: false, msg: "已停止測試" } }))
+        return
+      }
       setTests((t) => ({ ...t, [id]: { ok: false, msg: "連線發生問題，請確認伺服器已啟動。" } }))
+    } finally {
+      if (testTasksRef.current[id]?.ctrl === ctrl) delete testTasksRef.current[id]
     }
   }
 
-  return { data, busy, tests, reload, activate, setModel, saveByok, runTest }
+  async function stopTest(id: string) {
+    const current = testTasksRef.current[id]
+    if (!current) return
+    try {
+      await stopTask(current.taskId)
+    } catch {
+      // 停止失敗時仍中止前端等待。
+    } finally {
+      current.ctrl.abort()
+      delete testTasksRef.current[id]
+      setTests((t) => ({ ...t, [id]: { ok: false, msg: "已停止測試" } }))
+    }
+  }
+
+  return { data, busy, tests, reload, activate, setModel, saveByok, runTest, stopTest }
 }
 
 // CLI 代理清單（目前支援的本機 CLI）。顯示名與後端 id 對應。

@@ -4,6 +4,7 @@ import type { CandidateProfile, JobMatch, UserProfile, JobsAutoEvent } from "../
 import { readSSE } from "../sse"
 import { SAMPLE_RESUME } from "../sampleResume"
 import { resolveJd } from "../lib/resolveJd"
+import { newTaskId, stopTask } from "../lib/taskControl"
 import { profileDisplayName, profileSummary } from "../lib/profiles"
 import { JobList } from "../components/jobs/JobList"
 import { SRC_LABEL } from "../lib/sources"
@@ -79,6 +80,8 @@ export function JobSearchView(
   const [pages, setPages] = useState(2)  // 每個來源抓幾頁（越多越全、但越慢）
 
   const abortRef = useRef<AbortController | null>(null)  // 取消上一個未完成的搜尋
+  const taskIdRef = useRef("")
+  const stoppingRef = useRef(false)
 
   // 還原上次搜尋結果：重新整理 / 重開不必重找（僅開啟時還原一次，是 effect 正當用途）。
   useEffect(() => {
@@ -178,9 +181,14 @@ export function JobSearchView(
     if (cs.length) form.append("companies", cs.join(","))
     setSearchedCompanies(cs)
 
+    if (taskIdRef.current) void stopTask(taskIdRef.current).catch(() => undefined)
     abortRef.current?.abort()  // 取消上一個還沒跑完的搜尋，避免兩條串流交錯進同一個 acc
     const ctrl = new AbortController()
+    const taskId = newTaskId("job-search")
+    form.append("task_id", taskId)
     abortRef.current = ctrl
+    taskIdRef.current = taskId
+    stoppingRef.current = false
 
     setBusy(true); setDone(false); setError(""); setJobs([]); setCompanyJobs([]); setQueries([]); setSources([])
     setLinkedin(""); setProfile(null); setBlockedNote(""); setFallback(false); setRankTotal(0)
@@ -209,6 +217,7 @@ export function JobSearchView(
         }
         else if (ev.type === "company_jobs") { acc.companyJobs = sortByFit(ev.data as JobMatch[]); setCompanyJobs(acc.companyJobs) }
         else if (ev.type === "linkedin") { acc.linkedin = ev.url; setLinkedin(ev.url) }
+        else if (ev.type === "stopped") { stoppingRef.current = true; hadError = true; setStatus(ev.message || "已停止搜尋") }
         else if (ev.type === "error") { hadError = true; setError(ev.message) }
         else if (ev.type === "done") setDone(true)
       })
@@ -217,10 +226,30 @@ export function JobSearchView(
       }
       if (acc.jobs.length || acc.companyJobs.length) setFormOpen(false)  // 有結果就收合表單、凸顯職缺列表
     } catch (e) {
-      if ((e as Error)?.name === "AbortError") return  // 被新搜尋取消 → 靜默
+      if ((e as Error)?.name === "AbortError") return  // 被停止或新搜尋取消 → 靜默
       setError("連線發生問題，請確認伺服器是否啟動。")
     } finally {
-      if (abortRef.current === ctrl) { setBusy(false); setStatus("") }  // 僅當前搜尋才收尾
+      if (abortRef.current === ctrl) {
+        setBusy(false)
+        if (!stoppingRef.current) setStatus("")
+        abortRef.current = null
+        taskIdRef.current = ""
+        stoppingRef.current = false
+      }  // 僅當前搜尋才收尾
+    }
+  }
+
+  async function stopSearch() {
+    stoppingRef.current = true
+    setStatus("正在停止搜尋…")
+    try {
+      await stopTask(taskIdRef.current)
+    } catch {
+      // 停止端點失敗時仍中止前端串流，避免使用者被卡在等待狀態。
+    } finally {
+      abortRef.current?.abort()
+      setBusy(false)
+      setStatus("已停止搜尋")
     }
   }
 
@@ -378,6 +407,7 @@ export function JobSearchView(
 
         <div className="flex flex-wrap gap-2 mt-4 items-center">
           <Button onClick={onStart} loading={busy} icon={Search}>開始自動找職缺</Button>
+          {busy && <Button variant="danger" onClick={stopSearch} icon={XCircle}>停止</Button>}
           <Button variant="secondary" onClick={() => { setFile(null); setText(SAMPLE_RESUME) }} disabled={busy}>載入範例履歷</Button>
           <label className={`inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg font-medium border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition cursor-pointer focus-within:ring-2 focus-within:ring-brand-300 ${busy ? "opacity-50 pointer-events-none" : ""}`}>
             <Upload className="w-4 h-4" />上傳檔案（PDF/DOCX/TXT）
@@ -427,6 +457,7 @@ export function JobSearchView(
               <Loader2 className="w-3.5 h-3.5 animate-spin" />已評分 {jobs.length} / {rankTotal}
             </span>
           )}
+          {busy && <Button size="sm" variant="danger" onClick={stopSearch} icon={XCircle}>停止</Button>}
           <div className="ml-auto flex items-center gap-1.5 text-sm" role="group" aria-label="適配篩選">
             <span className="text-slate-500">適配</span>
             {FIT_BANDS.map((o) => (

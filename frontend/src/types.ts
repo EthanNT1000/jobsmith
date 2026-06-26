@@ -6,10 +6,11 @@ export interface ResumeAssessment {
   summary: string; strengths: string[]; issues: ResumeIssue[]; rewrite_examples: ResumeRewrite[];
 }
 export type SSEEvent =
-  | { type: "start" }
+  | { type: "start"; task_id?: string }
   | { type: "progress"; step: string; message: string }
   | { type: "profile"; data: unknown }
   | { type: "assessment"; data: ResumeAssessment }
+  | { type: "stopped"; message: string }
   | { type: "done" }
   | { type: "error"; message: string }
 
@@ -95,7 +96,7 @@ export interface SkillGapReport { top_demand: SkillCount[]; your_gaps: SkillCoun
 // ---- SSE 事件型別（取代各 view 的 any；對應後端 app/server.py 的串流）----
 // /api/jobs/auto：自動找職缺
 export type JobsAutoEvent =
-  | { type: "start" }
+  | { type: "start"; task_id?: string }
   | { type: "progress"; step: string; message: string }
   | { type: "profile"; data: UserProfile }
   | { type: "queries"; queries: string[] }
@@ -105,6 +106,7 @@ export type JobsAutoEvent =
   | { type: "ranked_batch"; data: JobMatch[] }
   | { type: "company_jobs"; data: JobMatch[] }
   | { type: "linkedin"; url: string }
+  | { type: "stopped"; message: string }
   | { type: "error"; message: string }
   | { type: "done" }
 
@@ -116,6 +118,7 @@ export type PipelineEvent =
   | { type: "profile_warning"; message: string }
   | ({ type: "telemetry" } & TelemetryEntry)
   | { type: "interrupt"; thread_id: string }
+  | { type: "stopped"; message: string }
   | { type: "error"; message: string }
   | { type: "done"; package_id?: number }
 
