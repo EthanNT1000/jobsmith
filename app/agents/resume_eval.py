@@ -41,6 +41,17 @@ _EDUCATION_MARKERS = (
     "大學", "學院", "學士", "碩士", "博士", "學歷",
 )
 _CONTACT_OR_URL_RE = re.compile(r"(@|https?://|www\.|linkedin|github|09\d{2})", re.IGNORECASE)
+_CJK_NAME_RE = re.compile(r"^[\u3400-\u9fff]{2,4}$")
+_COMMON_CJK_SURNAMES = set(
+    "王李張陳劉楊黃趙吳周徐孫馬朱胡郭何高林羅鄭梁謝宋唐許韓馮鄧曹彭曾蕭田董潘袁蔡蔣余于杜葉程魏蘇呂丁任沈姚盧姜崔鍾譚陸汪范金石廖賈夏韋付方白鄒孟熊秦邱江尹薛閻段雷侯龍史陶黎賀顧毛郝龔邵萬錢嚴覃武戴莫孔向湯"
+)
+_NAME_STOPWORDS = {
+    "狀在中", "在中", "工作", "年資", "學歷", "專長", "技能", "希望", "上日", "希面", "可上",
+}
+_NAME_BAD_FRAGMENTS = (
+    "狀", "工作", "職務", "希望", "地址", "電話", "手機", "主手", "mail", "email",
+    "學歷", "大學", "公司", "工程師", "履歷", "求職", "年", "月", "日",
+)
 
 
 def _resume_lines(resume_text: str) -> list[str]:
@@ -51,6 +62,8 @@ def _looks_like_name(line: str) -> bool:
     clean = line.strip()
     if not (2 <= len(clean) <= 60) or _CONTACT_OR_URL_RE.search(clean):
         return False
+    if clean in _NAME_STOPWORDS:
+        return False
     lowered = clean.lower()
     role_words = (
         "engineer", "developer", "designer", "manager", "analyst", "intern",
@@ -58,10 +71,39 @@ def _looks_like_name(line: str) -> bool:
     )
     if any(word in lowered for word in role_words):
         return False
+    if any(fragment in lowered for fragment in _NAME_BAD_FRAGMENTS):
+        return False
     if sum(ch.isdigit() for ch in clean) > 2:
         return False
     words = clean.split()
     return len(words) <= 4
+
+
+def _name_score(line: str, index: int) -> int:
+    clean = line.strip()
+    if not _looks_like_name(clean):
+        return -1
+    score = max(0, 80 - min(index, 40))
+    if _CJK_NAME_RE.fullmatch(clean):
+        score += 50
+        if clean[0] in _COMMON_CJK_SURNAMES:
+            score += 80
+        if 2 <= len(clean) <= 3:
+            score += 15
+    elif re.fullmatch(r"[A-Za-z][A-Za-z'.-]+(?:\s+[A-Za-z][A-Za-z'.-]+){0,3}", clean):
+        score += 50
+    return score
+
+
+def _infer_name(lines: list[str]) -> str:
+    candidates = [
+        (_name_score(line, idx), line)
+        for idx, line in enumerate(lines[:40])
+    ]
+    candidates = [(score, line) for score, line in candidates if score >= 0]
+    if not candidates:
+        return "未命名候選人"
+    return max(candidates, key=lambda item: item[0])[1]
 
 
 def _infer_roles(resume_text: str, skills: list[str]) -> list[str]:
@@ -78,7 +120,7 @@ def _fallback_profile_from_text(resume_text: str) -> Profile:
     lines = _resume_lines(resume_text)
     skills = extract_skills(resume_text)
     roles = _infer_roles(resume_text, skills)
-    name = next((line for line in lines[:8] if _looks_like_name(line)), "未命名候選人")
+    name = _infer_name(lines)
     skill_text = "、".join(skills[:6]) if skills else "履歷中的專案與工作經驗"
     summary = f"{roles[0]}，具備 {skill_text} 等背景。"
     experiences = [
@@ -102,7 +144,13 @@ def _fallback_profile_from_text(resume_text: str) -> Profile:
 
 def _repair_profile(profile: Profile, resume_text: str) -> Profile:
     fallback = _fallback_profile_from_text(resume_text)
-    if not profile.name.strip():
+    fallback_name = fallback.name.strip()
+    profile_name = profile.name.strip()
+    if fallback_name and fallback_name != "未命名候選人" and (
+        not profile_name
+        or profile_name not in resume_text
+        or (fallback_name != profile_name and _name_score(profile_name, 0) < 0)
+    ):
         profile.name = fallback.name
     if not profile.summary.strip():
         profile.summary = fallback.summary

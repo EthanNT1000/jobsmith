@@ -30,7 +30,7 @@ interface RunEvent {
 export function PipelineView(
   {
     seed, activeProfile, profiles, preferences, watch, onBack, onSelectProfile,
-    onSaveActiveProfile, onDeleteProfile, onClearActiveProfile,
+    onSaveActiveProfile, onUpdateActiveProfile, onDeleteProfile, onClearActiveProfile,
   }:
   {
     seed?: Seed | null; activeProfile?: CandidateProfile | null; profiles: CandidateProfile[]; preferences?: Preferences
@@ -38,6 +38,7 @@ export function PipelineView(
     onBack?: () => void
     onSelectProfile: (p: CandidateProfile | null) => void
     onSaveActiveProfile: (label?: string) => void | Promise<void>
+    onUpdateActiveProfile: (profile: UserProfile) => void
     onDeleteProfile: (id: string) => void
     onClearActiveProfile: () => void
   },
@@ -289,6 +290,7 @@ export function PipelineView(
             preferences={preferences}
             onSelectProfile={onSelectProfile}
             onSaveActiveProfile={activeProfile ? onSaveActiveProfile : undefined}
+            onUpdateActiveProfile={activeProfile ? onUpdateActiveProfile : undefined}
             onDeleteProfile={onDeleteProfile}
             onClearActiveProfile={onClearActiveProfile}
           />

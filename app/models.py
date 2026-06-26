@@ -2,7 +2,7 @@
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def coerce_str(v):
@@ -155,6 +155,25 @@ class ResumeRewrite(BaseModel):
     original: str = Field(description="原句")
     improved: str = Field(description="改寫後")
     why: str = Field(description="為何更好")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_aliases(cls, data):
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        if not out.get("original"):
+            out["original"] = out.get("before") or out.get("old") or out.get("source") or ""
+        if not out.get("improved"):
+            out["improved"] = out.get("after") or out.get("new") or out.get("rewrite") or ""
+        if not out.get("why"):
+            out["why"] = (
+                out.get("reason")
+                or out.get("explanation")
+                or out.get("rationale")
+                or "改寫後更清楚、具體且更貼近目標職缺。"
+            )
+        return out
 
 
 class ResumeAssessment(BaseModel):

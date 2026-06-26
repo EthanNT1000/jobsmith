@@ -1,4 +1,4 @@
-import type { CandidateProfile, Preferences, UserProfile } from "../types"
+import type { CandidateProfile, EditableProfile, Preferences, UserProfile } from "../types"
 
 export const PROFILE_STORAGE_KEY = "copilot.candidateProfiles.v1"
 
@@ -14,6 +14,46 @@ function str(v: unknown) {
 
 function strList(v: unknown): string[] {
   return Array.isArray(v) ? v.map((x) => str(x)).filter(Boolean) : []
+}
+
+function listText(v: unknown) {
+  return strList(v).join("\n")
+}
+
+function editableYears(v: unknown) {
+  if (typeof v === "number" && Number.isFinite(v)) return String(v)
+  return str(v)
+}
+
+function splitEditableList(v: string): string[] {
+  return v.split(/[\n,，、;；]+/).map((x) => x.trim()).filter(Boolean)
+}
+
+export function editableProfileFromUserProfile(profile?: UserProfile | null): EditableProfile {
+  return {
+    name: str(profile?.name),
+    summary: str(profile?.summary),
+    skills: listText(profile?.skills),
+    experiences: listText(profile?.experiences),
+    education: str(profile?.education),
+    years_experience: editableYears(profile?.years_experience),
+    preferred_roles: listText(profile?.preferred_roles),
+  }
+}
+
+export function userProfileFromEditableProfile(editable: EditableProfile, base: UserProfile = {}): UserProfile {
+  const yearsText = editable.years_experience.trim()
+  const years = Number(yearsText)
+  return {
+    ...base,
+    name: editable.name.trim(),
+    summary: editable.summary.trim(),
+    skills: splitEditableList(editable.skills),
+    experiences: splitEditableList(editable.experiences),
+    education: editable.education.trim(),
+    years_experience: yearsText ? (Number.isFinite(years) ? years : yearsText) : null,
+    preferred_roles: splitEditableList(editable.preferred_roles),
+  }
 }
 
 export function profileDisplayName(profile?: UserProfile | null) {

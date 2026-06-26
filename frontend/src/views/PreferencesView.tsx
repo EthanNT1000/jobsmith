@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import type { CandidateProfile, Preferences } from "../types"
+import type { CandidateProfile, Preferences, UserProfile } from "../types"
 import { clearLocalPersonalData } from "../lib/privacy"
 import { CandidateProfileManager } from "../components/CandidateProfileManager"
 import { Card } from "../ui/Card"
@@ -15,7 +15,7 @@ function split(s: string): string[] {
 export function PreferencesView(
   {
     value, onSave, onClearData, profiles, activeProfile, onSelectProfile,
-    onSaveActiveProfile, onDeleteProfile, onClearActiveProfile,
+    onSaveActiveProfile, onUpdateActiveProfile, onDeleteProfile, onClearActiveProfile,
   }:
   {
     value: Preferences
@@ -25,6 +25,7 @@ export function PreferencesView(
     activeProfile: CandidateProfile | null
     onSelectProfile: (p: CandidateProfile | null) => void
     onSaveActiveProfile: (label?: string) => void | Promise<void>
+    onUpdateActiveProfile: (profile: UserProfile) => void
     onDeleteProfile: (id: string) => void
     onClearActiveProfile: () => void
   },
@@ -119,6 +120,7 @@ export function PreferencesView(
           preferences={value}
           onSelectProfile={onSelectProfile}
           onSaveActiveProfile={onSaveActiveProfile}
+          onUpdateActiveProfile={onUpdateActiveProfile}
           onDeleteProfile={onDeleteProfile}
           onClearActiveProfile={onClearActiveProfile}
         />

@@ -92,6 +92,22 @@ export default function App() {
     setActiveProfile(profile ? { ...profile, saved: true } : null)
   }
 
+  function updateActiveProfile(profile: UserProfile) {
+    setActiveProfile((current) => {
+      if (!current) return current
+      const oldDisplay = profileDisplayName(current.profile)
+      const currentLabel = (current.label || "").trim()
+      const shouldRefreshLabel = !currentLabel || currentLabel === oldDisplay
+      return {
+        ...current,
+        profile,
+        label: shouldRefreshLabel ? profileDisplayName(profile) : current.label,
+        saved: false,
+        updatedAt: new Date().toISOString(),
+      }
+    })
+  }
+
   async function saveActiveProfile(label?: string) {
     if (!activeProfile) return
     const saved: CandidateProfile = {
@@ -215,6 +231,7 @@ export default function App() {
             <PipelineView seed={seed} activeProfile={activeProfile} profiles={profiles}
               preferences={preferences} watch={watch} onBack={() => setTab("search")}
               onSelectProfile={selectProfile} onSaveActiveProfile={saveActiveProfile}
+              onUpdateActiveProfile={updateActiveProfile}
               onDeleteProfile={deleteProfile} onClearActiveProfile={() => setActiveProfile(null)} />
           </div>
           <div key={`interview-${privacyVersion}`} className={tab === "interview" ? "" : "hidden"}>
@@ -227,6 +244,7 @@ export default function App() {
             <PreferencesView value={preferences} onSave={setPreferences} onClearData={clearPersonalState}
               profiles={profiles} activeProfile={activeProfile} onSelectProfile={selectProfile}
               onSaveActiveProfile={saveActiveProfile} onDeleteProfile={deleteProfile}
+              onUpdateActiveProfile={updateActiveProfile}
               onClearActiveProfile={() => setActiveProfile(null)} />
           </div>
         </div>

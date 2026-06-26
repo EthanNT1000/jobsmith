@@ -63,6 +63,16 @@ export interface JobMatch {
 // 使用者真實履歷結構（後端 /api/jobs/auto 與 /api/resume/evaluate 的 profile 事件，已排除 raw_text）
 export type UserProfile = Record<string, unknown>
 
+export interface EditableProfile {
+  name: string;
+  summary: string;
+  skills: string;
+  experiences: string;
+  education: string;
+  years_experience: string;
+  preferred_roles: string;
+}
+
 // 從職缺列表「產生投遞包」時，帶 JD + 使用者真實履歷進 pipeline（profile 缺省則後端用 demo）
 export interface Seed { jd: string; profile?: UserProfile | null; nonce: number }
 

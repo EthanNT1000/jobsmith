@@ -1,9 +1,16 @@
 import { useState } from "react"
-import type { CandidateProfile, Preferences } from "../types"
-import { profileDisplayName, profileRoles, profileSkills, profileSummary } from "../lib/profiles"
+import type { CandidateProfile, EditableProfile, Preferences, UserProfile } from "../types"
+import {
+  editableProfileFromUserProfile,
+  profileDisplayName,
+  profileRoles,
+  profileSkills,
+  profileSummary,
+  userProfileFromEditableProfile,
+} from "../lib/profiles"
 import { Badge } from "../ui/Badge"
 import { Button } from "../ui/Button"
-import { CheckCircle2, Save, Trash2, UserRound, UsersRound, X } from "../ui/icons"
+import { Check, CheckCircle2, Pencil, Save, Trash2, UserRound, UsersRound, X } from "../ui/icons"
 
 function fmtDate(iso: string) {
   try { return new Date(iso).toLocaleString("zh-TW", { dateStyle: "medium", timeStyle: "short" }) }
@@ -19,16 +26,46 @@ function Meta({ label, value }: { label: string; value: string }) {
   )
 }
 
+const fieldClass = "w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-200"
+
+function EditField(
+  { label, value, onChange, multiline = false, placeholder = "" }:
+  { label: string; value: string; onChange: (value: string) => void; multiline?: boolean; placeholder?: string },
+) {
+  return (
+    <label className="block">
+      <span className="block text-xs font-medium text-slate-500 mb-1">{label}</span>
+      {multiline ? (
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          rows={3}
+          className={`${fieldClass} resize-y`}
+          placeholder={placeholder}
+        />
+      ) : (
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={fieldClass}
+          placeholder={placeholder}
+        />
+      )}
+    </label>
+  )
+}
+
 export function CandidateProfileManager(
   {
     profiles, activeProfile, preferences, onSelectProfile, onSaveActiveProfile,
-    onDeleteProfile, onClearActiveProfile, compact = false,
+    onUpdateActiveProfile, onDeleteProfile, onClearActiveProfile, compact = false,
   }: {
     profiles: CandidateProfile[]
     activeProfile: CandidateProfile | null
     preferences?: Preferences
     onSelectProfile: (p: CandidateProfile | null) => void
     onSaveActiveProfile?: (label?: string) => void | Promise<void>
+    onUpdateActiveProfile?: (profile: UserProfile) => void
     onDeleteProfile?: (id: string) => void
     onClearActiveProfile?: () => void
     compact?: boolean
@@ -52,11 +89,12 @@ export function CandidateProfileManager(
 
       {activeProfile ? (
         <ActiveProfileCard
-          key={`${activeProfile.id}-${activeProfile.label}`}
+          key={`${activeProfile.id}-${activeProfile.label}-${activeProfile.updatedAt}`}
           activeProfile={activeProfile}
           activeIsSaved={Boolean(activeProfile.saved && selectedId)}
           preferences={preferences}
           onSaveActiveProfile={onSaveActiveProfile}
+          onUpdateActiveProfile={onUpdateActiveProfile}
           onClearActiveProfile={onClearActiveProfile}
         />
       ) : (
@@ -116,16 +154,22 @@ export function CandidateProfileManager(
 }
 
 function ActiveProfileCard(
-  { activeProfile, activeIsSaved, preferences, onSaveActiveProfile, onClearActiveProfile }:
+  {
+    activeProfile, activeIsSaved, preferences, onSaveActiveProfile,
+    onUpdateActiveProfile, onClearActiveProfile,
+  }:
   {
     activeProfile: CandidateProfile
     activeIsSaved: boolean
     preferences?: Preferences
     onSaveActiveProfile?: (label?: string) => void | Promise<void>
+    onUpdateActiveProfile?: (profile: UserProfile) => void
     onClearActiveProfile?: () => void
   },
 ) {
   const [label, setLabel] = useState(activeProfile.label || "")
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState<EditableProfile>(() => editableProfileFromUserProfile(activeProfile.profile))
   const [saved, setSaved] = useState(false)
   const skills = profileSkills(activeProfile.profile, 6)
   const roles = profileRoles(activeProfile.profile, preferences)
@@ -134,6 +178,23 @@ function ActiveProfileCard(
     if (!onSaveActiveProfile) return
     await onSaveActiveProfile(label)
     setSaved(true)
+  }
+
+  function updateDraft(field: keyof EditableProfile, value: string) {
+    setDraft((d) => ({ ...d, [field]: value }))
+    setSaved(false)
+  }
+
+  function startEdit() {
+    setDraft(editableProfileFromUserProfile(activeProfile.profile))
+    setEditing(true)
+    setSaved(false)
+  }
+
+  function applyEdit() {
+    if (!onUpdateActiveProfile) return
+    onUpdateActiveProfile(userProfileFromEditableProfile(draft, activeProfile.profile))
+    setEditing(false)
   }
 
   return (
@@ -147,14 +208,55 @@ function ActiveProfileCard(
           <CheckCircle2 className="w-3.5 h-3.5" />已儲存
         </span>}
       </div>
-      <dl className="grid sm:grid-cols-2 gap-3 mt-4">
-        <Meta label="Profile 名稱" value={activeProfile.label} />
-        <Meta label="履歷" value={activeProfile.resumeLabel || "已解析履歷"} />
-        <Meta label="目標職稱" value={roles.join("、")} />
-        <Meta label="想強調技能" value={(preferences?.emphasize_skills?.length ? preferences.emphasize_skills : skills).join("、")} />
-        <Meta label="語氣" value={preferences?.tone || ""} />
-        <Meta label="更新時間" value={fmtDate(activeProfile.updatedAt)} />
-      </dl>
+      {editing ? (
+        <div className="mt-4 space-y-3">
+          <div className="grid sm:grid-cols-2 gap-3">
+            <EditField label="姓名" value={draft.name} onChange={(v) => updateDraft("name", v)} placeholder="例：王予辰" />
+            <EditField label="年資" value={draft.years_experience} onChange={(v) => updateDraft("years_experience", v)} placeholder="例：3" />
+          </div>
+          <EditField
+            label="定位摘要"
+            value={draft.summary}
+            onChange={(v) => updateDraft("summary", v)}
+            multiline
+            placeholder="例：AI / 前端工程師，熟悉 Codex、Claude Code、Vue、FastAPI"
+          />
+          <div className="grid sm:grid-cols-2 gap-3">
+            <EditField
+              label="技能（可用換行、頓號或逗號分隔）"
+              value={draft.skills}
+              onChange={(v) => updateDraft("skills", v)}
+              multiline
+            />
+            <EditField
+              label="目標職稱（可用換行、頓號或逗號分隔）"
+              value={draft.preferred_roles}
+              onChange={(v) => updateDraft("preferred_roles", v)}
+              multiline
+            />
+          </div>
+          <EditField label="學歷" value={draft.education} onChange={(v) => updateDraft("education", v)} />
+          <EditField
+            label="經歷重點（可用換行、頓號或逗號分隔）"
+            value={draft.experiences}
+            onChange={(v) => updateDraft("experiences", v)}
+            multiline
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button icon={Check} onClick={applyEdit}>套用修改</Button>
+            <Button variant="secondary" icon={X} onClick={() => setEditing(false)}>取消</Button>
+          </div>
+        </div>
+      ) : (
+        <dl className="grid sm:grid-cols-2 gap-3 mt-4">
+          <Meta label="Profile 名稱" value={activeProfile.label} />
+          <Meta label="履歷" value={activeProfile.resumeLabel || "已解析履歷"} />
+          <Meta label="目標職稱" value={roles.join("、")} />
+          <Meta label="想強調技能" value={(preferences?.emphasize_skills?.length ? preferences.emphasize_skills : skills).join("、")} />
+          <Meta label="語氣" value={preferences?.tone || ""} />
+          <Meta label="更新時間" value={fmtDate(activeProfile.updatedAt)} />
+        </dl>
+      )}
       {onSaveActiveProfile && (
         <div className="mt-4 flex flex-col sm:flex-row gap-2">
           <input
@@ -167,6 +269,9 @@ function ActiveProfileCard(
           <Button icon={Save} onClick={saveActive}>
             {activeIsSaved ? "更新 Profile" : "儲存為 Profile"}
           </Button>
+          {onUpdateActiveProfile && !editing && (
+            <Button variant="secondary" icon={Pencil} onClick={startEdit}>編輯 Profile</Button>
+          )}
           {onClearActiveProfile && (
             <Button variant="secondary" icon={X} onClick={onClearActiveProfile}>不使用 Profile</Button>
           )}

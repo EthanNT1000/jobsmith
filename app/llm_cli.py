@@ -73,7 +73,7 @@ def _run_process(args: list[str], *, env: dict[str, str], timeout: int):
 def _safe_arg(text: str) -> str:
     """移除 NUL：含 \\x00 的字串當 subprocess 參數會直接 ValueError("embedded null byte")。
     履歷/JD 等外部文字（UTF-16 .txt、某些 PDF 抽取）偶有殘留，作為邊界防線一律先清掉。"""
-    return (text or "").replace("\x00", "")
+    return (text or "").replace("\x00", "").lstrip()
 
 
 def _messages_to_prompt(messages) -> tuple[str, str]:
@@ -85,6 +85,15 @@ def _messages_to_prompt(messages) -> tuple[str, str]:
         else:
             human_parts.append(content)
     return "\n\n".join(system_parts), "\n\n".join(human_parts)
+
+
+def _join_prompt(*parts: str) -> str:
+    """Join prompt sections without leading blank lines.
+
+    Codex CLI treats prompts that start with blank lines as an empty interactive task in
+    some Windows invocations, so keep the first character meaningful.
+    """
+    return "\n\n".join(part.strip() for part in parts if (part or "").strip())
 
 
 def _extract_json(text: str) -> str:
@@ -150,7 +159,7 @@ def _repair_hint(exc: ValidationError) -> str:
 def _structured_loop(run_prompt, schema, messages, backend_label: str = "CLI"):
     """共用結構化輸出迴圈：組提示 → 跑 → 抽/驗 → 失敗帶欄位錯誤重試。"""
     system, human = _messages_to_prompt(messages)
-    base = f"{system}\n\n{human}\n\n{_schema_instruction(schema)}"
+    base = _join_prompt(system, human, _schema_instruction(schema))
     prompt = base
     last_err = None
     last_raw = ""
@@ -282,7 +291,7 @@ class ClaudeCLIChat:
 
     def invoke(self, messages):
         system, human = _messages_to_prompt(messages)
-        return _run_claude(f"{system}\n\n{human}", self.model, timeout=self.timeout)
+        return _run_claude(_join_prompt(system, human), self.model, timeout=self.timeout)
 
 
 # ---------------------------------------------------------------------------
@@ -356,4 +365,4 @@ class CodexCLIChat:
 
     def invoke(self, messages):
         system, human = _messages_to_prompt(messages)
-        return _run_codex(f"{system}\n\n{human}", timeout=self.timeout, extra_args=self._extra())
+        return _run_codex(_join_prompt(system, human), timeout=self.timeout, extra_args=self._extra())

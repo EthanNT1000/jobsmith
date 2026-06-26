@@ -143,6 +143,32 @@ def test_codex_structured_parses(monkeypatch):
     assert out.name == "c" and out.score == 5
 
 
+def test_codex_structured_prompt_does_not_start_with_blank(monkeypatch):
+    seen = {}
+
+    def runner(prompt, timeout=None, extra_args=None):
+        seen["prompt"] = prompt
+        return '{"name": "c", "score": 5}'
+
+    monkeypatch.setattr(cli, "_run_codex", runner)
+    cli.CodexCLIChat().with_structured_output(Toy).invoke([("human", "h")])
+
+    assert not seen["prompt"].startswith("\n")
+
+
+def test_codex_invoke_prompt_does_not_start_with_blank(monkeypatch):
+    seen = {}
+
+    def runner(prompt, timeout=None, extra_args=None):
+        seen["prompt"] = prompt
+        return "ok"
+
+    monkeypatch.setattr(cli, "_run_codex", runner)
+    cli.CodexCLIChat().invoke([("human", "h")])
+
+    assert not seen["prompt"].startswith("\n")
+
+
 def test_run_claude_strips_null_bytes_from_prompt(monkeypatch):
     # 履歷/JD 偶有殘留 \x00（UTF-16 .txt、某些 PDF）；
     # 直接進 subprocess 會丟 ValueError("embedded null byte")。
@@ -212,3 +238,25 @@ def test_run_codex_strips_null_bytes_from_prompt(monkeypatch):
     monkeypatch.setattr(cli.shutil, "which", lambda name: "codex")
     cli._run_codex("JD\x00內容\x00殘留")
     assert all("\x00" not in a for a in seen["args"])
+
+
+def test_run_codex_strips_leading_blank_prompt(monkeypatch):
+    seen = {}
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(args, **kwargs):
+        seen["prompt"] = args[-1]
+        out_file = args[args.index("-o") + 1]
+        with open(out_file, "w", encoding="utf-8") as f:
+            f.write("ok")
+        return FakeProc()
+
+    monkeypatch.setattr(cli, "_run_process", fake_run)
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "codex")
+    cli._run_codex("\n\nReply with exactly: OK")
+
+    assert seen["prompt"] == "Reply with exactly: OK"

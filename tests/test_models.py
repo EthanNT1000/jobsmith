@@ -112,6 +112,14 @@ def test_resume_assessment_round_trips():
     assert dumped["rewrite_examples"][0]["improved"].startswith("主導")
 
 
+def test_resume_rewrite_accepts_common_llm_aliases():
+    rewrite = ResumeRewrite(before="負責 API", after="主導 API 設計並降低延遲", explanation="更具體")
+
+    assert rewrite.original == "負責 API"
+    assert rewrite.improved == "主導 API 設計並降低延遲"
+    assert rewrite.why == "更具體"
+
+
 def test_resume_assessment_score_bounds():
     with pytest.raises(ValidationError):
         ResumeAssessment(
