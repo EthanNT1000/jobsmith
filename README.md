@@ -12,7 +12,7 @@
 
 [English](README.en.md) · [**下載（Windows）**](#下載) · [快速開始](#快速開始從原始碼) · [系統架構](#系統架構) · [隱私](docs/PRIVACY.md)
 
-![License](https://img.shields.io/badge/License-MIT-green)
+![License](https://img.shields.io/badge/License-Apache_2.0-green)
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-multi--agent-1C3C3C)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
@@ -214,4 +214,4 @@ cd frontend && npm run build   # 型別檢查 + 正式建置
 
 ## 授權
 
-採用 [MIT 授權條款](LICENSE)。
+採用 [Apache License 2.0](LICENSE)。
