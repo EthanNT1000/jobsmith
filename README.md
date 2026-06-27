@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="frontend/public/logo512.png" alt="Jobsmith logo" width="84" height="84" />
+<img src="https://raw.githubusercontent.com/kevin333353/jobsmith/master/frontend/public/logo512.png" alt="Jobsmith logo" width="84" height="84" />
 
 # Jobsmith
 
